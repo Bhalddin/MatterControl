@@ -44,7 +44,6 @@ namespace MatterHackers.MatterControl.EeProm
 	{
 		private static Regex nameSanitizer = new Regex("[^_a-zA-Z0-9-]", RegexOptions.Compiled);
 
-		private EventHandler unregisterEvents;
 		protected PrinterConfig printer;
 
 		public EEPromPage(PrinterConfig printer)
@@ -52,23 +51,18 @@ namespace MatterHackers.MatterControl.EeProm
 		{
 			this.HeaderText = "EEProm Settings".Localize();
 			this.WindowSize = new VectorMath.Vector2(663, 575);
-			headerRow.Margin = this.headerRow.Margin.Clone(bottom: 0);
-
 			this.printer = printer;
 
-			// Close window if printer is disconnected
-			printer.Connection.CommunicationStateChanged.RegisterEvent((s, e) =>
-			{
-				if(!printer.Connection.IsConnected)
-				{
-					this.DialogWindow.CloseOnIdle();
-				}
-			}, ref unregisterEvents);
+			headerRow.Margin = this.headerRow.Margin.Clone(bottom: 0);
+
+			printer.Connection.CommunicationStateChanged += CommunicationStateChanged;
 		}
 
 		public override void OnClosed(EventArgs e)
 		{
-			unregisterEvents?.Invoke(this, null);
+			// Unregister listeners
+			printer.Connection.CommunicationStateChanged -= CommunicationStateChanged;
+
 			base.OnClosed(e);
 		}
 
@@ -78,14 +72,20 @@ namespace MatterHackers.MatterControl.EeProm
 			string printerName = printer.Settings.GetValue(SettingsKey.printer_name).Replace(" ", "_");
 			return nameSanitizer.Replace(printerName, "");
 		}
+
+		private void CommunicationStateChanged(object s, EventArgs e)
+		{
+			if (!printer.Connection.IsConnected)
+			{
+				this.DialogWindow.CloseOnIdle();
+			}
+		}
 	}
 
 	public class RepetierEEPromPage : EEPromPage
 	{
 		private EePromRepetierStorage currentEePromSettings;
 		private FlowLayoutWidget settingsColumn;
-
-		private EventHandler unregisterEvents;
 
 		public RepetierEEPromPage(PrinterConfig printer)
 			: base(printer)
@@ -109,7 +109,7 @@ namespace MatterHackers.MatterControl.EeProm
 
 			CreateSpacer(row);
 
-			row.AddChild(new TextWidget("Value".Localize(), pointSize: theme.FontSize10, textColor: ActiveTheme.Instance.PrimaryTextColor)
+			row.AddChild(new TextWidget("Value".Localize(), pointSize: theme.FontSize10, textColor: theme.TextColor)
 			{
 				VAnchor = VAnchor.Center,
 				Margin = new BorderDouble(left: 5, right: 60)
@@ -189,7 +189,7 @@ namespace MatterHackers.MatterControl.EeProm
 			this.AddPageAction(exportButton);
 
 			currentEePromSettings.Clear();
-			printer.Connection.CommunicationUnconditionalFromPrinter.RegisterEvent(currentEePromSettings.Add, ref unregisterEvents);
+			printer.Connection.LineReceived += currentEePromSettings.Add;
 			currentEePromSettings.SettingAdded += NewSettingReadFromPrinter;
 			currentEePromSettings.AskPrinterForSettings(printer.Connection);
 
@@ -247,7 +247,6 @@ namespace MatterHackers.MatterControl.EeProm
 				currentEePromSettings.SettingAdded -= NewSettingReadFromPrinter;
 			}
 
-			unregisterEvents?.Invoke(this, null);
 			base.OnClosed(e);
 		}
 
@@ -319,7 +318,7 @@ namespace MatterHackers.MatterControl.EeProm
 		private GuiWidget AddDescription(string description)
 		{
 			var holder = new GuiWidget(340, 40);
-			holder.AddChild(new TextWidget(description, pointSize: theme.DefaultFontSize, textColor: ActiveTheme.Instance.PrimaryTextColor)
+			holder.AddChild(new TextWidget(description, pointSize: theme.DefaultFontSize, textColor: theme.TextColor)
 			{
 				VAnchor = VAnchor.Center
 			});

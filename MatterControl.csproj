@@ -58,6 +58,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
+    <None Include="appsettings.json" />
     <None Include="StaticData\License\license.json" />
     <None Include="StaticData\OEMSettings\ExploreFeed.json" />
     <None Include="StaticData\OEMSettings\OEMUrls.json" />
@@ -103,6 +104,15 @@
     <Content Include="application.ico">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <Content Include="libgmp-10.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="libigl_boolean.exe">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="libmpfr-4.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <None Include="StaticData\MatterControl EULA.txt" />
     <None Include="StaticData\BuildInfo.txt" />
     <None Include="StaticData\License\agg-sharp.txt" />
@@ -111,8 +121,6 @@
     <None Include="StaticData\License\matterslice.txt" />
     <None Include="StaticData\License\opentk.txt" />
     <None Include="StaticData\SliceSettings\Layouts.txt" />
-    <None Include="StaticData\SliceSettings\load_filament.txt" />
-    <None Include="StaticData\SliceSettings\unload_filament.txt" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

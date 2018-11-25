@@ -120,6 +120,19 @@ namespace MatterHackers.MatterControl.CustomWidgets
 			this.Rebuild();
 		}
 
+		public override void OnClosed(EventArgs e)
+		{
+			// Iterate and close all held tab widgets
+			foreach (var item in allTabs)
+			{
+				item.widget.Close();
+			}
+
+			allTabs.Clear();
+
+			base.OnClosed(e);
+		}
+
 		public override void Initialize()
 		{
 			base.Initialize();
@@ -172,7 +185,7 @@ namespace MatterHackers.MatterControl.CustomWidgets
 				nameWidget.widget.ClearRemovedFlag();
 			}
 
-			this.RemoveAllChildren();
+			this.CloseAllChildren();
 
 			SimpleTabs tabControl = null;
 
@@ -226,7 +239,7 @@ namespace MatterHackers.MatterControl.CustomWidgets
 						{
 							Name = item.key + " Tab",
 							InactiveTabColor = Color.Transparent,
-							ActiveTabColor = theme.ActiveTabColor
+							ActiveTabColor = theme.BackgroundColor
 						};
 
 					tab.CloseClicked += (s, e) =>
@@ -254,7 +267,7 @@ namespace MatterHackers.MatterControl.CustomWidgets
 						Width = this.ConstrainedWidth,
 						VAnchor = VAnchor.Stretch,
 						HAnchor = HAnchor.Right,
-						BackgroundColor = theme.ActiveTabColor,
+						BackgroundColor = theme.BackgroundColor,
 						SplitterBarColor = theme.SplitterBackground,
 						SplitterWidth = theme.SplitterWidth,
 					};
@@ -344,7 +357,7 @@ namespace MatterHackers.MatterControl.CustomWidgets
 				});
 				buttonView.AfterDraw += (s, e) =>
 				{
-					e.Graphics2D.Render(rotatedLabel, theme.Colors.PrimaryTextColor);
+					e.Graphics2D.Render(rotatedLabel, theme.TextColor);
 				};
 			}
 
@@ -380,7 +393,7 @@ namespace MatterHackers.MatterControl.CustomWidgets
 						BackgroundColor = theme.TabBarBackground,
 					};
 
-					titleBar.AddChild(new TextWidget(title, textColor: theme.Colors.PrimaryTextColor)
+					titleBar.AddChild(new TextWidget(title, textColor: theme.TextColor)
 					{
 						Margin = new BorderDouble(left: 8),
 						VAnchor = VAnchor.Center

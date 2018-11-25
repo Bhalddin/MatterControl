@@ -66,6 +66,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 	public class ViewModeChangedEventArgs : EventArgs
 	{
 		public PartViewMode ViewMode { get; set; }
+		public PartViewMode PreviousMode { get; set; }
 	}
 
 	public class TransformStateChangedEventArgs : EventArgs
@@ -89,9 +90,12 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 
 		private ViewControls3DButtons activeTransformState = ViewControls3DButtons.PartSelect;
 		private List<(GuiWidget button, SceneSelectionOperation operation)> operationButtons;
-		private PartPreviewContent partPreviewContent = null;
+		private MainViewWidget mainViewWidget = null;
 		private PopupMenuButton bedMenuButton;
 		private ThemeConfig theme;
+		private UndoBuffer undoBuffer;
+		private IconButton undoButton;
+		private IconButton redoButton;
 
 		internal void NotifyResetView()
 		{
@@ -102,10 +106,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 
 		public ViewControls3DButtons ActiveButton
 		{
-			get
-			{
-				return activeTransformState;
-			}
+			get => activeTransformState;
 			set
 			{
 				this.activeTransformState = value;
@@ -163,7 +164,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 
 				int thumbWidth = 24;
 
-				popupMenu.CreateSubMenu("Recent".Localize(), menuTheme, (subMenu) =>
+				popupMenu.CreateSubMenu("Open Recent".Localize(), menuTheme, (subMenu) =>
 				{
 					// Select the 25 most recent files and project onto FileSystemItems
 					var recentFiles = new DirectoryInfo(ApplicationDataStorage.Instance.PlatingDirectory).GetFiles("*.mcx").OrderByDescending(f => f.LastWriteTime);
@@ -226,8 +227,6 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 					}
 				});
 
-				popupMenu.CreateSeparator();
-
 				var actions = new NamedAction[] {
 					new ActionSeparator(),
 					workspaceActions["Cut"],
@@ -240,17 +239,13 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 					{
 						ID = "Export",
 						Title = "Export".Localize(),
-						Icon = AggContext.StaticData.LoadIcon("cube_export.png", 16, 16),
+						Icon = AggContext.StaticData.LoadIcon("cube_export.png", 16, 16, menuTheme.InvertIcons),
 						Action = () =>
 						{
-							UiThread.RunOnIdle(async () =>
-							{
-								DialogWindow.Show(
-									new ExportPrintItemPage(new[]
-									{
-										new InMemoryLibraryItem(sceneContext.Scene)
-									}, false));
-							});
+							ApplicationController.Instance.ExportLibraryItems(
+								new[] { new InMemoryLibraryItem(sceneContext.Scene)},
+								centerOnBed: false,
+								printer: view3DWidget.Printer);
 						},
 						IsEnabled = () => sceneContext.EditableScene
 							|| (sceneContext.EditContext.SourceItem is ILibraryAsset libraryAsset
@@ -262,7 +257,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 						Title = "Arrange All Parts".Localize(),
 						Action = () =>
 						{
-							sceneContext.Scene.AutoArrangeChildren(view3DWidget.BedCenter);
+							sceneContext.Scene.AutoArrangeChildren(view3DWidget.BedCenter).ConfigureAwait(false);
 						},
 						IsEnabled = () => sceneContext.EditableScene
 					},
@@ -281,7 +276,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 					}
 				};
 
-				theme.CreateMenuItems(popupMenu, actions, emptyMenu: false);
+				menuTheme.CreateMenuItems(popupMenu, actions, emptyMenu: false);
 
 				return popupMenu;
 			};
@@ -291,6 +286,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 			: base(theme)
 		{
 			this.theme = theme;
+			this.undoBuffer = undoBuffer;
 			this.ActionArea.Click += (s, e) =>
 			{
 				view3DWidget.InteractionLayer.Focus();
@@ -325,7 +321,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 
 			this.AddChild(new ToolbarSeparator(theme));
 
-			var undoButton = new IconButton(AggContext.StaticData.LoadIcon("Undo_grey_16x.png", 16, 16, theme.InvertIcons), theme)
+			undoButton = new IconButton(AggContext.StaticData.LoadIcon("Undo_grey_16x.png", 16, 16, theme.InvertIcons), theme)
 			{
 				Name = "3D View Undo",
 				ToolTipText = "Undo",
@@ -347,7 +343,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 			};
 			this.AddChild(undoButton);
 
-			var redoButton = new IconButton(AggContext.StaticData.LoadIcon("Redo_grey_16x.png", 16, 16, theme.InvertIcons), theme)
+			redoButton = new IconButton(AggContext.StaticData.LoadIcon("Redo_grey_16x.png", 16, 16, theme.InvertIcons), theme)
 			{
 				Name = "3D View Redo",
 				Margin = theme.ButtonSpacing,
@@ -384,12 +380,6 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 			}
 
 			this.AddChild(new ToolbarSeparator(theme));
-
-			undoBuffer.Changed += (sender, e) =>
-			{
-				undoButton.Enabled = undoBuffer.UndoCount > 0;
-				redoButton.Enabled = undoBuffer.RedoCount > 0;
-			};
 
 			undoButton.Enabled = undoBuffer.UndoCount > 0;
 			redoButton.Enabled = undoBuffer.RedoCount > 0;
@@ -491,7 +481,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 				{
 					UiThread.RunOnIdle(() =>
 					{
-						namedAction.Action.Invoke(sceneContext.Scene);
+						namedAction.Action.Invoke(sceneContext);
 						var partTab = button.Parents<PartTabPage>().FirstOrDefault();
 						var view3D = partTab.Descendants<View3DWidget>().FirstOrDefault();
 						view3D.InteractionLayer.Focus();
@@ -500,10 +490,18 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 				this.AddChild(button);
 			}
 
+			// Register listeners
+			undoBuffer.Changed += UndoBuffer_Changed;
 			sceneContext.Scene.SelectionChanged += Scene_SelectionChanged;
 
 			// Run on load
 			Scene_SelectionChanged(null, null);
+		}
+
+		private void UndoBuffer_Changed(object sender, EventArgs e)
+		{
+			undoButton.Enabled = undoBuffer.UndoCount > 0;
+			redoButton.Enabled = undoBuffer.RedoCount > 0;
 		}
 
 		private IconButton CreateOpenButton(ThemeConfig theme)
@@ -567,7 +565,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 				VAnchor = VAnchor.Fit,
 			};
 
-			var openColor = theme.ResolveColor(theme.ActiveTabColor, theme.SlightShade);
+			var openColor = theme.ResolveColor(theme.BackgroundColor, theme.SlightShade);
 
 			PopupMenuButton libraryPopup = null;
 			libraryPopup = new PopupMenuButton(buttonView, theme)
@@ -578,9 +576,9 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 				AlwaysKeepOpen = true,
 				DynamicPopupContent = () =>
 				{
-					if (partPreviewContent == null)
+					if (mainViewWidget == null)
 					{
-						partPreviewContent = this.Parents<PartPreviewContent>().FirstOrDefault();
+						mainViewWidget = this.Parents<MainViewWidget>().FirstOrDefault();
 					}
 
 					var verticalResizeContainer = new VerticalResizeContainer(theme, GrabBarSide.Right)
@@ -605,7 +603,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 
 					var systemWindow = this.Parents<SystemWindow>().FirstOrDefault();
 
-					var printLibraryWidget = new PrintLibraryWidget(partPreviewContent, theme, libraryPopup)
+					var printLibraryWidget = new PrintLibraryWidget(mainViewWidget, theme, libraryPopup)
 					{
 						HAnchor = HAnchor.Stretch,
 						VAnchor = VAnchor.Absolute,
@@ -664,6 +662,8 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 
 		private GuiWidget CreateSaveButton(ThemeConfig theme)
 		{
+			PopupMenuButton saveButton = null;
+
 			var iconButton = new IconButton(
 				AggContext.StaticData.LoadIcon("save_grey_16x.png", 16, 16, theme.InvertIcons),
 				theme)
@@ -673,13 +673,26 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 
 			iconButton.Click += (s, e) =>
 			{
-				ApplicationController.Instance.Tasks.Execute("Saving".Localize(), sceneContext.SaveChanges).ConfigureAwait(false);
+				ApplicationController.Instance.Tasks.Execute("Saving".Localize(), async(progress, cancellationToken) =>
+				{
+					saveButton.Enabled = false;
+
+					try
+					{
+						await sceneContext.SaveChanges(progress, cancellationToken);
+					}
+					catch
+					{
+					}
+
+					saveButton.Enabled = true;
+				}).ConfigureAwait(false);
 			};
 
 			// Remove right Padding for drop style
 			iconButton.Padding = iconButton.Padding.Clone(right: 0);
 
-			var button = new PopupMenuButton(iconButton, theme)
+			saveButton = new PopupMenuButton(iconButton, theme)
 			{
 				Name = "Save SplitButton",
 				ToolTipText = "Save As".Localize(),
@@ -725,7 +738,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 
 			iconButton.Selectable = true;
 
-			return button;
+			return saveButton;
 		}
 
 		public static async void LoadAndAddPartsToPlate(GuiWidget originatingWidget, string[] filesToLoad, BedConfig sceneContext)
@@ -842,7 +855,10 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 
 		public override void OnClosed(EventArgs e)
 		{
+			// Unregister listeners
+			undoBuffer.Changed -= UndoBuffer_Changed;
 			sceneContext.Scene.SelectionChanged -= Scene_SelectionChanged;
+
 			base.OnClosed(e);
 		}
 	}

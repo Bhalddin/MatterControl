@@ -44,15 +44,12 @@ namespace MatterHackers.MatterControl
 {
 	public partial class ApplicationSettingsPage : DialogPage
 	{
-		private ThemeColorPanel themeColorPanel;
-
 		public ApplicationSettingsPage()
+			: base("Close".Localize())
 		{
 			this.AlwaysOnTopOfMain = true;
 			this.WindowTitle = this.HeaderText = "MatterControl " + "Settings".Localize();
 			this.WindowSize = new Vector2(700 * GuiWidget.DeviceScale, 600 * GuiWidget.DeviceScale);
-
-			this.SetCancelButtonText("Close".Localize());
 
 			contentRow.Padding = theme.DefaultContainerPadding;
 			contentRow.Padding = 0;
@@ -89,7 +86,7 @@ namespace MatterHackers.MatterControl
 				AppContext.Platform.OpenCameraPreview();
 			};
 
-			var printer = ApplicationController.Instance.ActivePrinter;
+			var printer = ApplicationController.Instance.ActivePrinters.FirstOrDefault() ?? PrinterConfig.EmptyPrinter;
 
 			this.AddSettingsRow(
 				new SettingsItem(
@@ -104,7 +101,10 @@ namespace MatterHackers.MatterControl
 						}
 					},
 					previewButton,
-					AggContext.StaticData.LoadIcon("camera-24x24.png", 24, 24)),
+					AggContext.StaticData.LoadIcon("camera-24x24.png", 24, 24))
+				{
+					Enabled = printer.Settings.PrinterSelected
+				},
 				generalPanel
 			);
 #endif
@@ -293,38 +293,11 @@ namespace MatterHackers.MatterControl
 
 			this.AddSettingsRow(textSizeRow, generalPanel);
 
-			var accentButtons = new ThemeColorPanel.AccentColorsWidget(AppContext.ThemeSet, 16)
-			{
-				HAnchor = HAnchor.Fit,
-				VAnchor = VAnchor.Center | VAnchor.Fit,
-				Margin = new BorderDouble(right: theme.DefaultContainerPadding)
-			};
-
-			themeColorPanel = new ThemeColorPanel(theme, accentButtons)
-			{
-				HAnchor = HAnchor.Stretch,
-				Margin = new BorderDouble(10, 10, 10, 2)
-			};
-
-			accentButtons.ThemeColorPanel = themeColorPanel;
-
-			var themeSection = new SectionWidget("Theme".Localize(), themeColorPanel, theme, accentButtons, expanded: true, expandingContent: false)
-			{
-				Name = "Theme Section",
-				HAnchor = HAnchor.Stretch,
-				VAnchor = VAnchor.Fit,
-				Margin = 0
-			};
+			var themeSection = CreateThemePanel(theme);
 			contentRow.AddChild(themeSection);
-
 			theme.ApplyBoxStyle(themeSection);
 
-			themeSection.SetNonExpandableIcon(AggContext.StaticData.LoadIcon("theme.png", 16, 16, theme.InvertIcons));
-
-			var advancedPanel = new FlowLayoutWidget(FlowDirection.TopToBottom)
-			{
-				Margin = new BorderDouble(2, 0)
-			};
+			var advancedPanel = new FlowLayoutWidget(FlowDirection.TopToBottom);
 
 			var advancedSection = new SectionWidget("Advanced".Localize(), advancedPanel, theme, serializationKey: "ApplicationSettings-Advanced", expanded: false)
 			{
@@ -336,12 +309,6 @@ namespace MatterHackers.MatterControl
 			contentRow.AddChild(advancedSection);
 
 			theme.ApplyBoxStyle(advancedSection);
-
-			// Enforce consistent SectionWidget spacing
-			foreach (var section in contentRow.Children<SectionWidget>())
-			{
-				section.Margin = new BorderDouble(0, 10, 0, 0);
-			}
 
 			// Touch Screen Mode
 			this.AddSettingsRow(
@@ -396,6 +363,53 @@ namespace MatterHackers.MatterControl
 				advancedPanel);
 
 			advancedPanel.Children<SettingsItem>().First().Border = new BorderDouble(0, 1);
+
+			// Enforce consistent SectionWidget spacing and last child borders
+			foreach (var section in contentRow.Children<SectionWidget>())
+			{
+				section.Margin = new BorderDouble(0, 10, 0, 0);
+
+				if (section.ContentPanel.Children.LastOrDefault() is SettingsItem lastRow)
+				{
+					// If we're in a contentPanel that has SettingsItems...
+
+					// Clear the last items bottom border
+					lastRow.Border = lastRow.Border.Clone(bottom: 0);
+
+					// Set a common margin on the parent container
+					section.ContentPanel.Margin = new BorderDouble(2, 0);
+				}
+			}
+		}
+
+		public static SectionWidget CreateThemePanel(ThemeConfig theme)
+		{
+			var accentButtons = new ThemeColorPanel.AccentColorsWidget(AppContext.ThemeSet, 16)
+			{
+				HAnchor = HAnchor.Fit,
+				VAnchor = VAnchor.Center | VAnchor.Fit,
+				Margin = new BorderDouble(right: theme.DefaultContainerPadding)
+			};
+
+			var themeColorPanel = new ThemeColorPanel(theme, accentButtons)
+			{
+				HAnchor = HAnchor.Stretch,
+				Margin = new BorderDouble(10, 10, 10, 2)
+			};
+
+			accentButtons.ThemeColorPanel = themeColorPanel;
+
+			var themeSection = new SectionWidget("Theme".Localize(), themeColorPanel, theme, accentButtons, expanded: true, expandingContent: false)
+			{
+				Name = "Theme Section",
+				HAnchor = HAnchor.Stretch,
+				VAnchor = VAnchor.Fit,
+				Margin = 0
+			};
+
+			themeSection.SetNonExpandableIcon(AggContext.StaticData.LoadIcon("theme.png", 16, 16, theme.InvertIcons));
+
+			return themeSection;
 		}
 
 		private void AddSettingsRow(GuiWidget widget, GuiWidget container)

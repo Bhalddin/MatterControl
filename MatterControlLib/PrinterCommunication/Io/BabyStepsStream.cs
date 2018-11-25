@@ -41,22 +41,23 @@ namespace MatterHackers.MatterControl.PrinterCommunication.Io
 		private MaxLengthStream maxLengthStream;
 		private OffsetStream offsetStream;
 		private EventHandler unregisterEvents;
-		private PrinterConfig printer;
 
 		public BabyStepsStream(PrinterConfig printer, GCodeStream internalStream, double startingMaxLength = 1)
-			: base(null)
+			: base(printer, internalStream)
 		{
-			this.printer = printer;
-			PrinterSettings.SettingChanged.RegisterEvent((s, e) =>
+			void Printer_SettingChanged(object s, EventArgs e)
 			{
 				if ((e as StringEventArgs)?.Data == SettingsKey.baby_step_z_offset)
 				{
 					OffsetChanged();
 				}
-			}, ref unregisterEvents);
+			}
 
-			maxLengthStream = new MaxLengthStream(internalStream, startingMaxLength);
-			offsetStream = new OffsetStream(maxLengthStream, new Vector3(0, 0, printer.Settings.GetValue<double>(SettingsKey.baby_step_z_offset)));
+			printer.Settings.SettingChanged += Printer_SettingChanged;
+			printer.Disposed += (s, e) => printer.Settings.SettingChanged -= Printer_SettingChanged;
+
+			maxLengthStream = new MaxLengthStream(printer, internalStream, startingMaxLength);
+			offsetStream = new OffsetStream(maxLengthStream, printer, new Vector3(0, 0, printer.Settings.GetValue<double>(SettingsKey.baby_step_z_offset)));
 			base.internalStream = offsetStream;
 		}
 

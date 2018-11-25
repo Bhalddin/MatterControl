@@ -66,7 +66,7 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 				HAnchor = HAnchor.Stretch,
 				VAnchor = VAnchor.Stretch,
 				Padding = theme.DefaultContainerPadding,
-				BackgroundColor = theme.ActiveTabColor
+				BackgroundColor = theme.BackgroundColor
 			};
 
 			editWidget = new MHTextEditWidget("", theme, multiLine: true)
@@ -130,14 +130,6 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 				Name = "Preview Tab"
 			};
 			tabControl.AddTab(previewTab);
-
-			tabControl.ActiveTabChanged += (s, e) =>
-			{
-				if (tabControl.SelectedTabIndex == 1)
-				{
-					// dummyWidget.Markdown = editWidget.Text;
-				}
-			};
 
 			tabControl.SelectedTabIndex = 0;
 

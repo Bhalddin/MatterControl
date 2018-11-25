@@ -35,7 +35,6 @@ using MatterHackers.Agg.Font;
 using MatterHackers.Agg.Image;
 using MatterHackers.Agg.Platform;
 using MatterHackers.Agg.UI;
-using MatterHackers.ImageProcessing;
 using MatterHackers.VectorMath;
 
 namespace MatterHackers.MatterControl.CustomWidgets
@@ -119,7 +118,7 @@ namespace MatterHackers.MatterControl.CustomWidgets
 				});
 			};
 
-			this.HighlightRegion.AddChild(textWidget = new TextWidget(this.Text, pointSize: theme.DefaultFontSize, textColor: theme.Colors.PrimaryTextColor)
+			this.HighlightRegion.AddChild(textWidget = new TextWidget(this.Text, pointSize: theme.DefaultFontSize, textColor: theme.TextColor)
 			{
 				Selectable = false,
 				AutoExpandBoundsToText = true,
@@ -171,7 +170,8 @@ namespace MatterHackers.MatterControl.CustomWidgets
 		{
 			if (isDirty)
 			{
-				RebuildContentSection();
+				// doing this durring draw will often result in a enumeration changed
+				UiThread.RunOnIdle(RebuildContentSection);
 			}
 
 			base.OnDraw(graphics2D);

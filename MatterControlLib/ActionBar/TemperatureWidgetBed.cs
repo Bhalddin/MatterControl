@@ -31,7 +31,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using MatterHackers.Agg;
-using MatterHackers.Agg.ImageProcessing;
 using MatterHackers.Agg.Platform;
 using MatterHackers.Agg.UI;
 using MatterHackers.Localizations;
@@ -48,6 +47,7 @@ namespace MatterHackers.MatterControl.ActionBar
 		private string waitingForBedToHeatMessage = "The bed is currently heating and its target temperature cannot be changed until it reaches {0}°C.\n\nYou can set the starting bed temperature in SETTINGS -> Filament -> Temperatures.\n\n{1}".Localize();
 		private string waitingForBedToHeatTitle = "Waiting For Bed To Heat".Localize();
 		private Dictionary<string, UIField> allUiFields = new Dictionary<string, UIField>();
+		private RunningInterval runningInterval;
 
 		public TemperatureWidgetBed(PrinterConfig printer, ThemeConfig theme)
 			: base(printer, "150.3°", theme)
@@ -60,7 +60,8 @@ namespace MatterHackers.MatterControl.ActionBar
 
 			this.PopupContent = this.GetPopupContent(ApplicationController.Instance.MenuTheme);
 
-			printer.Connection.BedTemperatureRead.RegisterEvent((s, e) => DisplayCurrentTemperature(), ref unregisterEvents);
+			// Register listeners
+			printer.Connection.BedTemperatureRead += Connection_BedTemperatureRead;
 		}
 
 		protected override int ActualTemperature => (int)printer.Connection.ActualBedTemperature;
@@ -74,7 +75,7 @@ namespace MatterHackers.MatterControl.ActionBar
 				HAnchor = HAnchor.Absolute,
 				VAnchor = VAnchor.Fit,
 				Padding = new BorderDouble(12, 0),
-				BackgroundColor = menuTheme.ActiveTabColor
+				BackgroundColor = menuTheme.BackgroundColor
 			};
 
 			var container = new FlowLayoutWidget(FlowDirection.TopToBottom)
@@ -118,7 +119,6 @@ namespace MatterHackers.MatterControl.ActionBar
 
 			var settingsData = SettingsOrganizer.Instance.GetSettingsData(SettingsKey.bed_temperature);
 			var temperatureRow = SliceSettingsTabView.CreateItemRow(settingsData, settingsContext, printer, menuTheme, ref tabIndex, allUiFields);
-			SliceSettingsRow.AddBordersToEditFields(temperatureRow);
 			container.AddChild(temperatureRow);
 
 			alwaysEnabled.Add(hotendRow);
@@ -137,15 +137,14 @@ namespace MatterHackers.MatterControl.ActionBar
 				Margin = new BorderDouble(0, 5, 0, 0),
 			};
 
-			var runningInterval = UiThread.SetInterval(() =>
+			runningInterval = UiThread.SetInterval(() =>
 			{
 				graph.AddData(this.ActualTemperature);
 			}, 1);
-			this.Closed += (s, e) => runningInterval.Continue = false;
 
-			var valueField = temperatureRow.Descendants<MHNumberEdit>().FirstOrDefault();
 			var settingsRow = temperatureRow.DescendantsAndSelf<SliceSettingsRow>().FirstOrDefault();
-			PrinterSettings.SettingChanged.RegisterEvent((s, e) =>
+
+			void Printer_SettingChanged(object s, EventArgs e)
 			{
 				if (e is StringEventArgs stringEvent)
 				{
@@ -166,7 +165,7 @@ namespace MatterHackers.MatterControl.ActionBar
 						var temp = printer.Settings.GetValue<double>(SettingsKey.bed_temperature);
 						graph.GoalValue = temp;
 
-						// TODO: Why is this only when enabled? How does it get set to 
+						// TODO: Why is this only when enabled? How does it get set to
 						if (heatToggle.Checked)
 						{
 							// TODO: Why is a UI widget who is listening to model events driving this behavior? What when it's not loaded?
@@ -175,8 +174,11 @@ namespace MatterHackers.MatterControl.ActionBar
 
 						settingsRow.UpdateStyle();
 					}
-				};
-			}, ref unregisterEvents);
+				}
+			}
+
+			printer.Settings.SettingChanged += Printer_SettingChanged;
+			printer.Disposed += (s, e) => printer.Settings.SettingChanged -= Printer_SettingChanged;
 
 			container.AddChild(graph);
 
@@ -193,6 +195,15 @@ namespace MatterHackers.MatterControl.ActionBar
 			base.OnDraw(graphics2D);
 		}
 
+		public override void OnClosed(EventArgs e)
+		{
+			// Unregister listeners
+			printer.Connection.BedTemperatureRead -= Connection_BedTemperatureRead;
+			UiThread.ClearInterval(runningInterval);
+
+			base.OnClosed(e);
+		}
+
 		protected override void SetTargetTemperature(double targetTemp)
 		{
 			double goalTemp = (int)(targetTemp + .5);
@@ -207,6 +218,11 @@ namespace MatterHackers.MatterControl.ActionBar
 			{
 				printer.Connection.TargetBedTemperature = (int)(targetTemp + .5);
 			}
+		}
+
+		private void Connection_BedTemperatureRead(object s, EventArgs e)
+		{
+			DisplayCurrentTemperature();
 		}
 	}
 }

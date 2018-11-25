@@ -30,11 +30,8 @@ either expressed or implied, of the FreeBSD Project.
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
-using System.Threading.Tasks;
 using JsonPath;
 using MatterHackers.Agg;
-using MatterHackers.Agg.Image;
 using MatterHackers.Agg.Platform;
 using MatterHackers.Agg.UI;
 using MatterHackers.DataConverters3D;
@@ -43,8 +40,6 @@ using MatterHackers.MatterControl.CustomWidgets;
 using MatterHackers.MatterControl.DesignTools;
 using MatterHackers.MatterControl.Library;
 using MatterHackers.MatterControl.SlicerConfiguration;
-using MatterHackers.MeshVisualizer;
-using MatterHackers.VectorMath;
 using static JsonPath.JsonPathContext.ReflectionValueSystem;
 
 namespace MatterHackers.MatterControl.PartPreviewWindow
@@ -60,6 +55,8 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 
 		private GuiWidget editorPanel;
 
+		private string editorTitle = "Properties".Localize();
+
 		public SelectedObjectPanel(View3DWidget view3DWidget, BedConfig sceneContext, ThemeConfig theme)
 			: base(FlowDirection.TopToBottom)
 		{
@@ -72,17 +69,17 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 
 			var toolbar = new LeftClipFlowLayoutWidget()
 			{
-				BackgroundColor = theme.ActiveTabColor,
+				BackgroundColor = theme.BackgroundColor,
 				Padding = theme.ToolbarPadding,
 				HAnchor = HAnchor.Fit,
 				VAnchor = VAnchor.Fit
 			};
 
-			var scene = sceneContext.Scene;
+			scene = sceneContext.Scene;
 
 			// put in a make permanent button
 			var icon = AggContext.StaticData.LoadIcon("noun_766157.png", 16, 16, theme.InvertIcons).SetPreMultiply();
-			var flattenButton = new IconButton(icon, theme)
+			flattenButton = new IconButton(icon, theme)
 			{
 				Margin = theme.ButtonSpacing,
 				ToolTipText = "Flatten".Localize(),
@@ -96,7 +93,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 			toolbar.AddChild(flattenButton);
 
 			// put in a remove button
-			var removeButton = new IconButton(AggContext.StaticData.LoadIcon("remove.png", 16, 16, theme.InvertIcons), theme)
+			removeButton = new IconButton(AggContext.StaticData.LoadIcon("remove.png", 16, 16, theme.InvertIcons), theme)
 			{
 				Margin = theme.ButtonSpacing,
 				ToolTipText = "Delete".Localize(),
@@ -119,7 +116,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 			};
 			toolbar.AddChild(removeButton);
 
-			var overflowButton = new OverflowBar.OverflowMenuButton(theme)
+			overflowButton = new OverflowBar.OverflowMenuButton(theme)
 			{
 				Enabled = scene.SelectedItem != null,
 			};
@@ -146,7 +143,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 			scrollableWidget.AddChild(editorPanel);
 			scrollableWidget.ScrollArea.HAnchor = HAnchor.Stretch;
 
-			editorSectionWidget = new SectionWidget("Editor", scrollableWidget, theme, toolbar, expandingContent: false, defaultExpansion: true, setContentVAnchor: false)
+			editorSectionWidget = new SectionWidget(editorTitle, scrollableWidget, theme, toolbar, expandingContent: false, defaultExpansion: true, setContentVAnchor: false)
 			{
 				VAnchor = VAnchor.Stretch
 			};
@@ -155,33 +152,32 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 			this.ContentPanel = editorPanel;
 			editorPanel.Padding = new BorderDouble(theme.DefaultContainerPadding, 0);
 
-			scene.SelectionChanged += (s, e) =>
-			{
-				if (editorPanel.Children.FirstOrDefault()?.DescendantsAndSelf<SectionWidget>().FirstOrDefault() is SectionWidget firstSectionWidget)
-				{
-					firstSectionWidget.Margin = firstSectionWidget.Margin.Clone(top: 0);
-				}
-
-				var selectedItem = scene.SelectedItem;
-
-				flattenButton.Enabled = selectedItem?.CanFlatten == true;
-				removeButton.Enabled = selectedItem != null;
-				overflowButton.Enabled = selectedItem != null;
-			};
+			// Register listeners
+			scene.SelectionChanged += Scene_SelectionChanged;
 		}
 
 		public GuiWidget ContentPanel { get; set; }
 
 		private JsonPathContext pathResolver = new JsonPathContext();
+		private IconButton flattenButton;
+		private IconButton removeButton;
+		private OverflowBar.OverflowMenuButton overflowButton;
+		private InteractiveScene scene;
 
 		public void SetActiveItem(IObject3D selectedItem)
 		{
+			if (this.item == selectedItem)
+			{
+				return;
+			}
+
 			this.item = selectedItem;
 			editorPanel.CloseAllChildren();
 
 			// Allow caller to clean up with passing null for selectedItem
 			if (item == null)
 			{
+				editorSectionWidget.Text = editorTitle;
 				return;
 			}
 
@@ -364,6 +360,28 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 				children.Remove(this.item);
 				children.Add(content);
 			});
+		}
+
+		public override void OnClosed(EventArgs e)
+		{
+			// Unregister listeners
+			scene.SelectionChanged -= Scene_SelectionChanged;
+
+			base.OnClosed(e);
+		}
+
+		private void Scene_SelectionChanged(object sender, EventArgs e)
+		{
+			if (editorPanel.Children.FirstOrDefault()?.DescendantsAndSelf<SectionWidget>().FirstOrDefault() is SectionWidget firstSectionWidget)
+			{
+				firstSectionWidget.Margin = firstSectionWidget.Margin.Clone(top: 0);
+			}
+
+			var selectedItem = scene.SelectedItem;
+
+			flattenButton.Enabled = selectedItem?.CanFlatten == true;
+			removeButton.Enabled = selectedItem != null;
+			overflowButton.Enabled = selectedItem != null;
 		}
 	}
 }

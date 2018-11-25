@@ -17,12 +17,14 @@ namespace MatterHackers.MatterControl.SetupWizard
 		List<RadioButton> radioButtonList = new List<RadioButton>();
 		Dictionary<string, string> printerProfileData = new Dictionary<string, string>();
 		List<string> orderedProfiles = new List<string>();
+		private PrinterConfig printer;
 		ScrollableWidget scrollWindow;
 
-		public PrinterProfileHistoryPage()
+		public PrinterProfileHistoryPage(PrinterConfig printer)
 		{
 			this.WindowTitle = "Restore Settings".Localize();
 			this.HeaderText = "Restore Settings".Localize();
+			this.printer = printer;
 
 			scrollWindow = new ScrollableWidget()
 			{
@@ -43,17 +45,17 @@ namespace MatterHackers.MatterControl.SetupWizard
 				{
 					string profileToken = printerProfileData[orderedProfiles[index]];
 
-					var activeProfile = ProfileManager.Instance.ActiveProfile;
+					var profile = ProfileManager.Instance[printer.Settings.ID];
 
 					// Download the specified json profile
-					var printerSettings = await ApplicationController.GetPrinterProfileAsync(activeProfile, profileToken);
+					var printerSettings = await ApplicationController.GetPrinterProfileAsync(profile, profileToken);
 					if (printerSettings != null)
 					{
 						// Persist downloaded profile
 						printerSettings.Save();
 
-						// Update active instance without calling ReloadAll
-						ApplicationController.Instance.RefreshActiveInstance(printerSettings);
+						// Update/switch printer instance to new settings
+						printer.SwapToSettings(printerSettings);
 					}
 
 					UiThread.RunOnIdle(DialogWindow.Close);
@@ -67,10 +69,12 @@ namespace MatterHackers.MatterControl.SetupWizard
 		private async void LoadHistoryItems()
 		{
 			TextWidget loadingText = new TextWidget("Retrieving History from Web...");
-			loadingText.TextColor = ActiveTheme.Instance.PrimaryTextColor;
+			loadingText.TextColor = theme.TextColor;
 			scrollWindow.AddChild(loadingText);
 
-			var results = await ApplicationController.GetProfileHistory?.Invoke(ProfileManager.Instance.ActiveProfile.DeviceToken);
+			var profile = ProfileManager.Instance[printer.Settings.ID];
+
+			var results = await ApplicationController.GetProfileHistory?.Invoke(profile.DeviceToken);
 			printerProfileData = results;
 			if(printerProfileData != null)
 			{
@@ -90,7 +94,7 @@ namespace MatterHackers.MatterControl.SetupWizard
 				foreach (var group in groupedTimes)
 				{
 					// add in the group header
-					topToBottomStuff.AddChild(new TextWidget(RelativeTime.BlockDescriptions[group.Key], textColor: ActiveTheme.Instance.PrimaryTextColor)
+					topToBottomStuff.AddChild(new TextWidget(RelativeTime.BlockDescriptions[group.Key], textColor: theme.TextColor)
 					{
 						Margin = new BorderDouble(0, 0, 0, 5),
 					});
@@ -98,7 +102,7 @@ namespace MatterHackers.MatterControl.SetupWizard
 					foreach (var time in group.Value)
 					{
 						// add in the radio buttons
-						var profileVersionButton = new RadioButton(time.Value, textColor: ActiveTheme.Instance.PrimaryTextColor)
+						var profileVersionButton = new RadioButton(time.Value, textColor: theme.TextColor)
 						{
 							Margin = new BorderDouble(5, 0),
 						};
@@ -118,7 +122,7 @@ namespace MatterHackers.MatterControl.SetupWizard
 				loadingText.Text = "Failed To Download History!";
 				loadingText.TextColor = Color.Red;
 			}
-			
+
 			//remove loading profile text/icon
 		}
 

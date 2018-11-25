@@ -45,7 +45,6 @@ namespace MatterHackers.MatterControl.ActionBar
 		private GuiWidget connectButton;
 		private GuiWidget disconnectButton;
 
-		private EventHandler unregisterEvents;
 		private PrinterConfig printer;
 
 		private bool listenForConnectFailed = false;
@@ -96,7 +95,7 @@ namespace MatterHackers.MatterControl.ActionBar
 			cancelConnectButton.Click += (s, e) => UiThread.RunOnIdle(() =>
 			{
 				listenForConnectFailed = false;
-				ApplicationController.Instance.ConditionallyCancelPrint();
+				printer.CancelPrint();
 				cancelConnectButton.Enabled = false;
 			});
 			this.AddChild(cancelConnectButton);
@@ -146,33 +145,21 @@ namespace MatterHackers.MatterControl.ActionBar
 				child.Margin = theme.ButtonSpacing;
 			}
 
-			printer.Connection.EnableChanged.RegisterEvent((s, e) => SetVisibleStates(), ref unregisterEvents);
-			printer.Connection.CommunicationStateChanged.RegisterEvent((s, e) => SetVisibleStates(), ref unregisterEvents);
-			printer.Connection.ConnectionFailed.RegisterEvent((s, e) =>
-			{
-#if !__ANDROID__
-				// TODO: Someday this functionality should be revised to an awaitable Connect() call in the Connect button that
-				// shows troubleshooting on failed attempts, rather than hooking the failed event and trying to determine if the
-				// Connect button started the task
-				if (listenForConnectFailed
-					&& UiThread.CurrentTimerMs - connectStartMs < 25000)
-				{
-					UiThread.RunOnIdle(() =>
-					{
-						// User initiated connect attempt failed, show port selection dialog
-						DialogWindow.Show(new SetupStepComPortOne(printer));
-					});
-				}
-#endif
-				listenForConnectFailed = false;
-			}, ref unregisterEvents);
+			// Register listeners
+			printer.Connection.CommunicationStateChanged += Connection_CommunicationStateChanged;
+			printer.Connection.EnableChanged += Connection_EnableChanged;
+			printer.Connection.ConnectionFailed += Connection_Failed;
 
 			this.SetVisibleStates();
 		}
 
 		public override void OnClosed(EventArgs e)
 		{
-			unregisterEvents?.Invoke(this, null);
+			// Unregister listeners
+			printer.Connection.CommunicationStateChanged -= Connection_CommunicationStateChanged;
+			printer.Connection.EnableChanged -= Connection_EnableChanged;
+			printer.Connection.ConnectionFailed -= Connection_Failed;
+
 			base.OnClosed(e);
 		}
 
@@ -188,7 +175,7 @@ namespace MatterHackers.MatterControl.ActionBar
 					&& !FrostedSerialPort.HasPermissionToDevice())
 				{
 					// Opens the USB device permissions dialog which will call back into our UsbDevice broadcast receiver to connect
-					FrostedSerialPort.RequestPermissionToDevice(RunTroubleShooting);
+					FrostedSerialPort.RequestPermissionToDevice(this.RunTroubleShooting);
 				}
 				else
 #endif
@@ -199,10 +186,29 @@ namespace MatterHackers.MatterControl.ActionBar
 			}
 		}
 
-		private static void RunTroubleShooting()
+		private void RunTroubleShooting()
 		{
 			DialogWindow.Show(
-				new SetupWizardTroubleshooting(ApplicationController.Instance.ActivePrinter));
+				new SetupWizardTroubleshooting(printer));
+		}
+
+		private void Connection_Failed(object s, EventArgs e)
+		{
+#if !__ANDROID__
+			// TODO: Someday this functionality should be revised to an awaitable Connect() call in the Connect button that
+			// shows troubleshooting on failed attempts, rather than hooking the failed event and trying to determine if the
+			// Connect button started the task
+			if (listenForConnectFailed
+				&& UiThread.CurrentTimerMs - connectStartMs < 25000)
+			{
+				UiThread.RunOnIdle(() =>
+				{
+					// User initiated connect attempt failed, show port selection dialog
+					DialogWindow.Show(new SetupStepComPortOne(printer));
+				});
+			}
+#endif
+			listenForConnectFailed = false;
 		}
 
 		private void SetChildVisible(GuiWidget visibleChild, bool enabled)
@@ -244,6 +250,16 @@ namespace MatterHackers.MatterControl.ActionBar
 					SetChildVisible(disconnectButton, true);
 					break;
 			}
+		}
+
+		private void Connection_EnableChanged(object s, EventArgs e)
+		{
+			SetVisibleStates();
+		}
+
+		private void Connection_CommunicationStateChanged(object s, EventArgs e)
+		{
+			this.SetVisibleStates();
 		}
 	}
 }

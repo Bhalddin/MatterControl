@@ -44,9 +44,9 @@ namespace MatterHackers.MatterControl
 
 	public class ThemeConfig
 	{
-		private static ImageBuffer restoreNormal;
-		private static ImageBuffer restoreHover;
-		private static ImageBuffer restorePressed;
+		private ImageBuffer restoreNormal;
+		private ImageBuffer restoreHover;
+		private ImageBuffer restorePressed;
 
 		public int FontSize7 { get; } = 7;
 		public int FontSize8 { get; } = 8;
@@ -138,7 +138,6 @@ namespace MatterHackers.MatterControl
 			}
 		}
 
-		public ThemeColors Colors { get; set; } = new ThemeColors();
 		public PresetColors PresetColors { get; set; } = new PresetColors();
 
 		public bool IsDarkTheme { get; set; }
@@ -148,14 +147,16 @@ namespace MatterHackers.MatterControl
 		public Color Shade { get; set; }
 		public Color DarkShade { get; set; }
 
-		public Color ActiveTabColor { get; set; }
+		public Color BackgroundColor { get; set; }
+		public Color TextColor { get; set; } = Color.Black;
+
 		public Color TabBarBackground { get; set; }
 		public Color InactiveTabColor { get; set; }
 		public Color InteractionLayerOverlayColor { get; set; }
 
 		public TextWidget CreateHeading(string text)
 		{
-			return new TextWidget(text, pointSize: this.H1PointSize, textColor: this.Colors.PrimaryTextColor, bold: true)
+			return new TextWidget(text, pointSize: this.H1PointSize, textColor: this.TextColor, bold: true)
 			{
 				Margin = new BorderDouble(0, 5)
 			};
@@ -179,6 +180,7 @@ namespace MatterHackers.MatterControl
 			public Color ForegroundColor { get; set; }
 			public Color BorderColor { get; set; }
 			public Color TextColor { get; set; }
+			public Color LightTextColor { get; set; }
 		}
 
 		public class ThreeStateColor
@@ -241,7 +243,7 @@ namespace MatterHackers.MatterControl
 
 			this.GeneratingThumbnailIcon = AggContext.StaticData.LoadIcon("building_thumbnail_40x40.png", 40, 40, this.InvertIcons);
 
-			DefaultThumbView.ThumbColor = new Color(this.Colors.PrimaryTextColor, 30);
+			DefaultThumbView.ThumbColor = new Color(this.TextColor, 30);
 		}
 
 		public JogControls.MoveButton CreateMoveButton(PrinterConfig printer, string label, PrinterConnection.Axis axis, double movementFeedRate, bool levelingButtons = false)
@@ -304,7 +306,7 @@ namespace MatterHackers.MatterControl
 
 		public TextButton CreateDialogButton(string text)
 		{
-			return CreateDialogButton(text, this.MinimalShade, this.SlightShade);
+			return CreateDialogButton(text, this.SlightShade, this.SlightShade.WithAlpha(75));
 		}
 
 		public TextButton CreateDialogButton(string text, Color backgroundColor, Color hoverColor)
@@ -314,7 +316,8 @@ namespace MatterHackers.MatterControl
 			{
 				BackgroundColor = backgroundColor,
 				HoverColor = hoverColor,
-				MinimumSize = new Vector2(75, 0)
+				MinimumSize = new Vector2(75, 0),
+				Margin = this.ButtonSpacing
 			};
 #else
 			var button = new TextButton(text, this, this.FontSize14)
@@ -419,14 +422,9 @@ namespace MatterHackers.MatterControl
 			return imageBuffer;
 		}
 
-		public Button CreateSmallResetButton()
+		public GuiWidget CreateSmallResetButton()
 		{
-			return new Button(
-				new ButtonViewStates(
-					new ImageWidget(restoreNormal),
-					new ImageWidget(restoreHover),
-					new ImageWidget(restorePressed),
-					new ImageWidget(restoreNormal)))
+			return new HoverImageWidget(restoreNormal, restoreHover)
 			{
 				VAnchor = VAnchor.Center,
 				Margin = new BorderDouble(0, 0, 5, 0)
@@ -437,7 +435,7 @@ namespace MatterHackers.MatterControl
 		{
 			double scrollBarWidth = 10;
 
-			wordOptionContainer.AddChild(new TextWidget(header, textColor: this.Colors.PrimaryTextColor)
+			wordOptionContainer.AddChild(new TextWidget(header, textColor: this.TextColor)
 			{
 				Margin = new BorderDouble(10, 3, 3, 5),
 				HAnchor = HAnchor.Left

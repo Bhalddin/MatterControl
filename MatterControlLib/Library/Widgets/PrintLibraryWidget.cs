@@ -31,11 +31,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Threading.Tasks;
-
-#if !__ANDROID__
-using Markdig.Agg;
-#endif
 
 using MatterHackers.Agg;
 using MatterHackers.Agg.Platform;
@@ -44,9 +39,7 @@ using MatterHackers.Localizations;
 using MatterHackers.MatterControl.CustomWidgets;
 using MatterHackers.MatterControl.Library;
 using MatterHackers.MatterControl.PartPreviewWindow;
-using MatterHackers.MatterControl.PrinterCommunication;
 using MatterHackers.MatterControl.PrintQueue;
-using Newtonsoft.Json;
 
 namespace MatterHackers.MatterControl.PrintLibrary
 {
@@ -63,26 +56,28 @@ namespace MatterHackers.MatterControl.PrintLibrary
 		private GuiWidget searchInput;
 		private ILibraryContainer searchContainer;
 
-		private PartPreviewContent partPreviewContent;
+		private MainViewWidget mainViewWidget;
 		private ThemeConfig theme;
 		private OverflowBar navBar;
 		private GuiWidget searchButton;
 
-		public PrintLibraryWidget(PartPreviewContent partPreviewContent, ThemeConfig theme, PopupMenuButton popupMenuButton)
+		public PrintLibraryWidget(MainViewWidget mainViewWidget, ThemeConfig theme, PopupMenuButton popupMenuButton)
 		{
 			this.theme = theme;
-			this.partPreviewContent = partPreviewContent;
+			this.mainViewWidget = mainViewWidget;
 			this.Padding = 0;
 			this.AnchorAll();
 
 			var allControls = new FlowLayoutWidget(FlowDirection.TopToBottom);
 
-			libraryView = new LibraryListView(ApplicationController.Instance.Library, theme)
+			var libaryContext = ApplicationController.Instance.Library;
+
+			libraryView = new LibraryListView(libaryContext, theme)
 			{
 				Name = "LibraryView",
 				// Drop containers if ShowContainers != 1
 				ContainerFilter = (container) => UserSettings.Instance.ShowContainers,
-				BackgroundColor = theme.ActiveTabColor,
+				BackgroundColor = theme.BackgroundColor,
 				Border = new BorderDouble(top: 1)
 			};
 
@@ -256,7 +251,7 @@ namespace MatterHackers.MatterControl.PrintLibrary
 				return popupMenu;
 			};
 
-			breadCrumbWidget = new FolderBreadCrumbWidget(libraryView, theme);
+			breadCrumbWidget = new FolderBreadCrumbWidget(libaryContext, theme);
 			navBar.AddChild(breadCrumbWidget);
 
 			var searchPanel = new SearchInputBox(theme)
@@ -477,7 +472,7 @@ namespace MatterHackers.MatterControl.PrintLibrary
 		public override void OnLoad(EventArgs args)
 		{
 			// Defer creating menu items until plugins have loaded
-			LibraryWidget.CreateMenuActions(libraryView, menuActions, partPreviewContent, theme, allowPrint: true);
+			LibraryWidget.CreateMenuActions(libraryView, menuActions, mainViewWidget, theme, allowPrint: true);
 
 			navBar.OverflowButton.Name = "Print Library Overflow Menu";
 			navBar.ExtendOverflowMenu = (popupMenu) =>
@@ -520,7 +515,7 @@ namespace MatterHackers.MatterControl.PrintLibrary
 	public class SearchInputBox : GuiWidget
 	{
 		internal MHTextEditWidget searchInput;
-		public Button ResetButton { get; }
+		public GuiWidget ResetButton { get; }
 
 		public SearchInputBox(ThemeConfig theme, string emptyText = null)
 		{
@@ -536,8 +531,8 @@ namespace MatterHackers.MatterControl.PrintLibrary
 			this.AddChild(searchInput);
 
 			var resetButton = theme.CreateSmallResetButton();
-			resetButton.HAnchor = HAnchor.Right | HAnchor.Fit;
-			resetButton.VAnchor = VAnchor.Center | VAnchor.Fit;
+			resetButton.HAnchor |= HAnchor.Right;
+			resetButton.VAnchor |= VAnchor.Center;
 			resetButton.Name = "Close Search";
 			resetButton.ToolTipText = "Clear".Localize();
 

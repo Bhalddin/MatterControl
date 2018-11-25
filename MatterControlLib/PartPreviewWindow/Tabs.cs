@@ -160,8 +160,9 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 		{
 			_allTabs.Remove(tab);
 
-			TabBar.ActionArea.RemoveChild(tab as GuiWidget);
-			this.TabContainer.RemoveChild(tab.TabContent);
+			// Close Tab and TabContent widgets
+			tab.TabContent.Close();
+			(tab as GuiWidget)?.Close();
 
 			if (tab is ChromeTab chromeTab)
 			{
@@ -239,7 +240,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 			leadingTabAdornment.AfterDraw += (s, e) =>
 			{
 				var firstItem = this.AllTabs.OfType<ChromeTab>().FirstOrDefault();
-				ChromeTab.DrawTabLowerRight(e.Graphics2D, leadingTabAdornment.LocalBounds, (firstItem == this.ActiveTab) ? theme.ActiveTabColor : theme.InactiveTabColor);
+				ChromeTab.DrawTabLowerRight(e.Graphics2D, leadingTabAdornment.LocalBounds, (firstItem == this.ActiveTab) ? theme.BackgroundColor : theme.InactiveTabColor);
 			};
 			this.TabBar.ActionArea.AddChild(leadingTabAdornment);
 
@@ -370,11 +371,11 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 
 			if (iconImage != null)
 			{
-				tabPill = new TabPill(tabLabel, ActiveTheme.Instance.PrimaryTextColor, iconImage, pointSize);
+				tabPill = new TabPill(tabLabel, theme.TextColor, iconImage, pointSize);
 			}
 			else
 			{
-				tabPill = new TabPill(tabLabel, ActiveTheme.Instance.PrimaryTextColor, tabImageUrl, pointSize);
+				tabPill = new TabPill(tabLabel, theme.TextColor, tabImageUrl, pointSize);
 			}
 			tabPill.Margin = (hasClose) ? new BorderDouble(right: 16) : 0;
 
@@ -401,6 +402,14 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 			}
 
 			base.OnMouseDown(mouseEvent);
+		}
+
+		public override void OnClosed(EventArgs e)
+		{
+			base.OnClosed(e);
+
+			// Clear all listeners
+			this.CloseClicked = null;
 		}
 
 		private void ConditionallyCloseTab()
@@ -430,8 +439,10 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 				}
 				else
 				{
-					this.parentTabControl.RemoveTab(this);
 					this.CloseClicked?.Invoke(this, null);
+
+					// Must be called after CloseClicked otherwise listeners are cleared before event is invoked
+					this.parentTabControl?.RemoveTab(this);
 				}
 			});
 		}
@@ -511,7 +522,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 		{
 			this.Border = new BorderDouble(top: 1);
 			this.InactiveTabColor = Color.Transparent;
-			this.ActiveTabColor = theme.ActiveTabColor;
+			this.ActiveTabColor = theme.BackgroundColor;
 
 			tabPill.Padding = tabPill.Padding.Clone(top: 10, bottom: 10);
 		}
@@ -588,22 +599,30 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 
 			graphics2D.Render(
 				tabShape,
-				(this == activeTab) ? theme.ActiveTabColor : theme.InactiveTabColor);
+				(this == activeTab) ? theme.BackgroundColor : theme.InactiveTabColor);
 
 			if (drawLeftTabOverlap)
 			{
 				DrawTabLowerLeft(
 					graphics2D,
 					rect,
-					(leftSiblingSelected || this == activeTab) ? theme.ActiveTabColor : theme.InactiveTabColor);
+					(leftSiblingSelected || this == activeTab) ? theme.BackgroundColor : theme.InactiveTabColor);
 			}
 
 			if (rightSiblingSelected)
 			{
-				DrawTabLowerRight(graphics2D, rect, theme.ActiveTabColor);
+				DrawTabLowerRight(graphics2D, rect, theme.BackgroundColor);
 			}
 
 			base.OnDraw(graphics2D);
+		}
+
+		public override void OnClosed(EventArgs e)
+		{
+			this.parentTabControl = null;
+			this.TabContent = null;
+
+			base.OnClosed(e);
 		}
 
 		public string Title
@@ -636,6 +655,8 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 			tabLeft.MoveTo(rect.Left, rect.YCenter);
 			tabLeft.LineTo(rect.Left + tabInsetDistance, rect.Bottom);
 			tabLeft.LineTo(rect.Left, rect.Bottom);
+
+			graphics2D.Line(rect.Left, rect.YCenter, rect.Left + tabInsetDistance, rect.Bottom, AppContext.Theme.MinimalShade, 1.3);
 
 			graphics2D.Render(tabLeft, color);
 		}

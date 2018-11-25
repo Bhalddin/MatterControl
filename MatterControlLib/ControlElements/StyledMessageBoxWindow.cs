@@ -78,7 +78,7 @@ namespace MatterHackers.MatterControl
 				responseCallback = callback;
 				unwrappedMessage = message;
 
-				contentRow.AddChild(messageContainer = new TextWidget(message, textColor: ActiveTheme.Instance.PrimaryTextColor, pointSize: 12 * DeviceScale)
+				contentRow.AddChild(messageContainer = new TextWidget(message, textColor: theme.TextColor, pointSize: 12 * DeviceScale)
 				{
 					AutoExpandBoundsToText = true,
 					HAnchor = HAnchor.Left
@@ -164,4 +164,3 @@ namespace MatterHackers.MatterControl
 
 	}
 }
- 

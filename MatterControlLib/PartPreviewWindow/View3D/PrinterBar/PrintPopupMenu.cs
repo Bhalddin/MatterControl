@@ -45,7 +45,6 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 	public class PrintPopupMenu : PopupMenuButton
 	{
 		private PrinterConfig printer;
-		private EventHandler unregisterEvents;
 		private Dictionary<string, UIField> allUiFields = new Dictionary<string, UIField>();
 		private SettingsContext settingsContext;
 
@@ -74,10 +73,10 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 				var column = new FlowLayoutWidget(FlowDirection.TopToBottom)
 				{
 					Padding = theme.DefaultContainerPadding,
-					BackgroundColor = menuTheme.ActiveTabColor
+					BackgroundColor = menuTheme.BackgroundColor
 				};
 
-				column.AddChild(new TextWidget("Options".Localize(), textColor: menuTheme.Colors.PrimaryTextColor)
+				column.AddChild(new TextWidget("Options".Localize(), textColor: menuTheme.TextColor)
 				{
 					HAnchor = HAnchor.Left
 				});
@@ -98,12 +97,14 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 					var settingsData = SettingsOrganizer.Instance.GetSettingsData(key);
 					var row = SliceSettingsTabView.CreateItemRow(settingsData, settingsContext, printer, menuTheme, ref tabIndex, allUiFields);
 
-					SliceSettingsRow.AddBordersToEditFields(row);
 
 					optionsPanel.AddChild(row);
 				}
 
-				var subPanel = new FlowLayoutWidget(FlowDirection.TopToBottom);
+				var subPanel = new FlowLayoutWidget(FlowDirection.TopToBottom)
+				{
+					Margin = new BorderDouble(2, 0)
+				};
 
 				var sectionWidget = new SectionWidget("Advanced", subPanel, menuTheme, expanded: true)
 				{
@@ -125,15 +126,17 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 
 				foreach (var key in new[] { SettingsKey.spiral_vase, SettingsKey.layer_to_pause })
 				{
-					var settingsData = SettingsOrganizer.Instance.GetSettingsData(key);
-					var row = SliceSettingsTabView.CreateItemRow(settingsData, settingsContext, printer, menuTheme, ref tabIndex, allUiFields);
-
-					SliceSettingsRow.AddBordersToEditFields(row);
-
-					subPanel.AddChild(row);
+					subPanel.AddChild(
+						SliceSettingsTabView.CreateItemRow(
+							SettingsOrganizer.Instance.GetSettingsData(key),
+							settingsContext,
+							printer,
+							menuTheme,
+							ref tabIndex,
+							allUiFields));
 				}
 
-				theme.ApplyBoxStyle(sectionWidget);
+				menuTheme.ApplyBoxStyle(sectionWidget);
 
 				sectionWidget.Margin = new BorderDouble(0, 10);
 				sectionWidget.ContentPanel.Children<SettingsRow>().First().Border = new BorderDouble(0, 1);
@@ -149,7 +152,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 				{
 					// Exit if the bed is not GCode and the bed has no printable items
 					if ((printer.Bed.EditContext.SourceItem as ILibraryAsset)?.ContentType != "gcode"
-						&& !printer.PrintableItems(printer.Bed.EditContext.Content).Any())
+						&& !printer.PrintableItems(printer.Bed.Scene).Any())
 					{
 						return;
 					}
@@ -179,31 +182,35 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 				Padding = theme.TextButtonPadding.Clone(right: 5)
 			});
 
-			PrinterSettings.SettingChanged.RegisterEvent((s, e) =>
-			{
-				if (e is StringEventArgs stringEvent)
-				{
-					string settingsKey = stringEvent.Data;
-					if (allUiFields.TryGetValue(settingsKey, out UIField uifield))
-					{
-						string currentValue = settingsContext.GetValue(settingsKey);
-						if (uifield.Value != currentValue
-							|| settingsKey == "com_port")
-						{
-							uifield.SetValue(
-								currentValue,
-								userInitiated: false);
-						}
-					}
-				}
-			},
-			ref unregisterEvents);
+			// Register listeners
+			printer.Settings.SettingChanged += Printer_SettingChanged;
 		}
 
 		public override void OnClosed(EventArgs e)
 		{
-			unregisterEvents?.Invoke(this, null);
+			// Unregister listeners
+			printer.Settings.SettingChanged -= Printer_SettingChanged;
+
 			base.OnClosed(e);
+		}
+
+		private void Printer_SettingChanged(object s, EventArgs e)
+		{
+			if (e is StringEventArgs stringEvent)
+			{
+				string settingsKey = stringEvent.Data;
+				if (allUiFields.TryGetValue(settingsKey, out UIField uifield))
+				{
+					string currentValue = settingsContext.GetValue(settingsKey);
+					if (uifield.Value != currentValue
+						|| settingsKey == "com_port")
+					{
+						uifield.SetValue(
+							currentValue,
+							userInitiated: false);
+					}
+				}
+			}
 		}
 
 		private class IgnoredFlowLayout : FlowLayoutWidget, IIgnoredPopupChild

@@ -46,7 +46,7 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 		private GuiWidget dataArea;
 		private GuiWidget unitsArea;
 		private GuiWidget restoreArea;
-		private Button restoreButton = null;
+		private GuiWidget restoreButton = null;
 
 		public SliceSettingsRow(PrinterConfig printer, SettingsContext settingsContext, SliceSettingData settingData, ThemeConfig theme, bool fullRowSelect = false)
 			: base (settingData.PresentationName.Localize(), settingData.HelpText.Localize(), theme, fullRowSelect: fullRowSelect)
@@ -77,10 +77,10 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 					&& settingData.DataEditType != SliceSettingData.DataEditTypes.HARDWARE_PRESENT)
 				{
 					unitsArea.AddChild(
-					new WrappedTextWidget(settingData.Units.Localize(), pointSize: 8, textColor: theme.Colors.PrimaryTextColor)
-					{
-						Margin = new BorderDouble(5, 0),
-					});
+						new WrappedTextWidget(settingData.Units.Localize(), pointSize: 8, textColor: theme.TextColor)
+						{
+							Margin = new BorderDouble(5, 0),
+						});
 				}
 
 				restoreArea = new GuiWidget()
@@ -160,15 +160,6 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 				// show a right click menu ('Set as Default' & 'Help')
 				var popupMenu = new PopupMenu(ApplicationController.Instance.MenuTheme);
 
-				//var clearUserOverrideMenuItem = popupMenu.CreateMenuItem("Cleare User Override".Localize());
-				//clearUserOverrideMenuItem.Enabled = HasUserOverride(settingData.SlicerConfigName); // check if the settings is already the default
-				//clearUserOverrideMenuItem.Click += (s, e) =>
-				//{
-				//	// clear the override
-				//	UpdateStyle();
-				//	printer.Settings.Save();
-				//};
-
 				var setAsDefaultMenuItem = popupMenu.CreateMenuItem("Set as Default".Localize());
 				setAsDefaultMenuItem.Focus();
 				setAsDefaultMenuItem.Enabled = !SettingIsOem(); // check if the settings is already the default
@@ -181,12 +172,6 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 					UpdateStyle();
 					printer.Settings.Save();
 				};
-
-				//var helpMenuItem = popupMenu.CreateMenuItem("Help".Localize());
-				//helpMenuItem.Enabled = false; // check if there is any help available
-				//helpMenuItem.Click += (s, e) =>
-				//{
-				//};
 
 				var sourceEvent = mouseEvent.Position;
 				var systemWindow = this.Parents<SystemWindow>().FirstOrDefault();
@@ -289,15 +274,6 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 			{
 				if (restoreButton != null) restoreButton.Visible = false;
 				this.HighlightColor = Color.Transparent;
-			}
-		}
-
-		internal static void AddBordersToEditFields(GuiWidget row)
-		{
-			foreach (var widget in row.Descendants().Where(d => d is MHNumberEdit || d is MHTextEditWidget))
-			{
-				widget.Border = 1;
-				widget.BorderColor = row.BorderColor;
 			}
 		}
 

@@ -52,24 +52,6 @@
     "DefaultValue": "80"
   },
   {
-    "SlicerConfigName": "load_filament_length_over_six",
-    "PresentationName": "Load Filament Length",
-    "HelpText": "Should be 100%. Not shown to user.",
-    "DataEditType": "DOUBLE_OR_PERCENT",
-    "Units": "%",
-    "ShowIfSet": "!sla_printer",
-    "DefaultValue": "100%"
-  },
-  {
-    "SlicerConfigName": "load_filament_time",
-    "PresentationName": "Load Filament Time",
-    "HelpText": "The time it will take to load the filament",
-    "DataEditType": "POSITIVE_DOUBLE",
-    "Units": "s",
-    "ShowIfSet": "!sla_printer",
-    "DefaultValue": "5"
-  },
-  {
     "SlicerConfigName": "unload_filament_time",
     "PresentationName": "Unload Filament Time",
     "HelpText": "The time it will take to unload the filament",
@@ -88,15 +70,6 @@
     "DefaultValue": "70"
   },
   {
-    "SlicerConfigName": "unload_filament_length_over_six",
-    "PresentationName": "Unload Filament Length",
-    "HelpText": "Should be 100%. Not shown to user.",
-    "DataEditType": "DOUBLE_OR_PERCENT",
-    "Units": "%",
-    "ShowIfSet": "!sla_printer",
-    "DefaultValue": "100%"
-  },
-  {
     "SlicerConfigName": "trim_filament_markdown",
     "PresentationName": "Trim Filament Page",
     "HelpText": "The Markdown that will be shown on the Trim Filament page.",
@@ -105,20 +78,20 @@
     "DefaultValue": "Trim the end of the filament to ensure a good load.  \n![](https://www.matterhackers.com/r/c3zLyf)  \nMake sure you trim it at a slight angle"
   },
   {
-    "SlicerConfigName": "insert_filament_markdown",
+    "SlicerConfigName": "insert_filament_markdown2",
     "PresentationName": "Insert Filament Page",
     "HelpText": "The Markdown that will be shown on the Insert Filament page.",
     "DataEditType": "MARKDOWN_TEXT",
     "ShowIfSet": "!sla_printer",
-    "DefaultValue": "* Insert filament into the extruder until you feel it start to feed\n  * Make sure the filament is all the way into the extruder\n  * Hold the filament for several seconds until it catches\n  * Test that it is inserted by gently pulling down, there should be some resistance  \n* Click 'Continue'  \n![](https://lh3.googleusercontent.com/S4eW9-uZ0lgpg_ws9Ss4LmUc_MiXCfHnfJmGVQ0XtOdpvr_XZQLuP5zWGv7eCSM65EbsWIdHVMC40EYL7u8k7LvMP4Y)"
+    "DefaultValue": "* Insert filament into the extruder until you feel it start to feed\\n  * Make sure the filament is all the way into the extruder\\n  * Hold the filament for several seconds until it catches\\n  * Test that it is inserted by gently pulling down, there should be some resistance  \\n* Click 'Next'  \\n![Load Filament](https://www.matterhackers.com/r/Ipj4Bb)"
   },
   {
-    "SlicerConfigName": "running_clean_markdown",
+    "SlicerConfigName": "running_clean_markdown2",
     "PresentationName": "Clean Filament Page",
     "HelpText": "The Markdown that will be shown on the Clean Filament page.",
     "DataEditType": "MARKDOWN_TEXT",
     "ShowIfSet": "!sla_printer",
-    "DefaultValue": "In a few seconds filament should be coming out of the extruder\n* Wait for the new filament to be coming out with no trace of the previous filament\n* Click 'Continue' when the new filament is running cleanly\n## Success! Your new filament should now be loaded"
+    "DefaultValue": "In a few seconds filament should be coming out of the extruder\\n* Wait for the new filament to be coming out with no trace of the previous filament\\n* Click 'Next' when the new filament is running cleanly"
   },
   {
     "SlicerConfigName": "bottom_solid_layers",
@@ -157,7 +130,7 @@
   },
   {
     "SlicerConfigName": "bottom_infill_speed",
-    "PresentationName": "Botom Solid Infill",
+    "PresentationName": "Bottom Solid Infill",
     "HelpText": "The speed at which the bottom solid layers will print. Can be set explicitly or as a percentage of the Infill speed. Use 0 to match infill speed.",
     "DataEditType": "DOUBLE_OR_PERCENT",
     "Units": "mm/s or %",
@@ -739,7 +712,7 @@
   {
     "SlicerConfigName": "leveling_sample_points",
     "PresentationName": "Sample Points",
-    "HelpText": "A comma separated list of sample points to probe the bed at. You must specify an x and y position for each point. For example: '20,20,100,180,180,20' will saple the bad at 3 points.",
+    "HelpText": "A comma separated list of sample points to probe the bed at. You must specify an x and y position for each point. For example: '20,20,100,180,180,20' will sample the bad at 3 points.",
     "DataEditType": "MULTI_LINE_TEXT",
     "DefaultValue": "20,20,100,180,180,20",
     "ShowIfSet": "!sla_printer&!has_hardware_leveling&print_leveling_solution=Custom Points",
@@ -783,6 +756,15 @@
     "HelpText": "Flag keeping track if probe calibration wizard has been run.",
     "DataEditType": "CHECK_BOX",
     "ShowIfSet": "!has_hardware_leveling",
+    "DefaultValue": "0",
+    "RebuildGCodeOnChange": false
+  },
+  {
+    "SlicerConfigName": "filament_has_been_loaded",
+    "PresentationName": "Filament Has Been Loaded",
+    "HelpText": "Flag for the state of our filament loaded.",
+    "DataEditType": "CHECK_BOX",
+    "ShowIfSet": "!sla_printer",
     "DefaultValue": "0",
     "RebuildGCodeOnChange": false
   },
@@ -1066,6 +1048,13 @@
     "SlicerConfigName": "model",
     "PresentationName": "Model",
     "HelpText": "This is the model of printer this profile is targeting.",
+    "DataEditType": "READONLY_STRING",
+    "DefaultValue": "Undefined"
+  },
+  {
+    "SlicerConfigName": "created_date",
+    "PresentationName": "Creation Data",
+    "HelpText": "The date this file was originally created.",
     "DataEditType": "READONLY_STRING",
     "DefaultValue": "Undefined"
   },
@@ -1863,9 +1852,9 @@
     "ReloadUiWhenChanged": true
   },
   {
-    "SlicerConfigName": "enable_line_spliting",
-    "PresentationName": "Enable Line Spliting",
-    "HelpText": "Allow MatterControl to split long lines to improve levesing and print canceling. Critical for printers that are significantly out of level.",
+    "SlicerConfigName": "enable_line_splitting",
+    "PresentationName": "Enable Line Splitting",
+    "HelpText": "Allow MatterControl to split long lines to improve leveling and print canceling. Critical for printers that are significantly out of level.",
     "ShowIfSet": "!sla_printer",
     "DataEditType": "CHECK_BOX",
     "DefaultValue": "1",

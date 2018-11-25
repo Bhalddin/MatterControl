@@ -42,8 +42,6 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 {
 	public class GCodePanel : FlowLayoutWidget
 	{
-		private EventHandler unregisterEvents;
-
 		private BedConfig sceneContext;
 		private ThemeConfig theme;
 		private PrinterConfig printer;
@@ -96,19 +94,21 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 			var firstSection = this.Children<SectionWidget>().First();
 			firstSection.BorderColor = Color.Transparent; // Disable top border on first item to produce a more flat, dark top edge
 
-			PrinterSettings.SettingChanged.RegisterEvent((s, e) =>
-			{
-				if (e is StringEventArgs stringEvent)
-				{
-					if (stringEvent.Data == "extruder_offset")
-					{
-						printer.Bed.GCodeRenderer?.Clear3DGCode();
-					}
-				}
-			}, ref unregisterEvents);
-
+			// Register listeners
+			printer.Settings.SettingChanged += Printer_SettingChanged;
 			printer.Bed.LoadedGCodeChanged += Bed_LoadedGCodeChanged;
 			printer.Bed.RendererOptions.PropertyChanged += RendererOptions_PropertyChanged;
+		}
+
+		private void Printer_SettingChanged(object s, EventArgs e)
+		{
+			if (e is StringEventArgs stringEvent)
+			{
+				if (stringEvent.Data == "extruder_offset")
+				{
+					printer.Bed.GCodeRenderer?.Clear3DGCode();
+				}
+			}
 		}
 
 		private void RefreshGCodeDetails(PrinterConfig printer)
@@ -121,7 +121,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 				loadedGCodeSection.AddChild(
 					speedsWidget = new SectionWidget(
 						"Speeds".Localize(),
-						new SpeedsLegend(sceneContext.LoadedGCode, theme)
+						new SpeedsLegend(sceneContext.LoadedGCode, theme, printer)
 						{
 							HAnchor = HAnchor.Stretch,
 							Visible = renderSpeeds,
@@ -214,10 +214,11 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 
 		public override void OnClosed(EventArgs e)
 		{
+			// Unregister listeners
+			printer.Settings.SettingChanged -= Printer_SettingChanged;
 			printer.Bed.RendererOptions.PropertyChanged -= RendererOptions_PropertyChanged;
 			printer.Bed.LoadedGCodeChanged -= Bed_LoadedGCodeChanged;
 
-			unregisterEvents?.Invoke(this, null);
 			base.OnClosed(e);
 		}
 	}

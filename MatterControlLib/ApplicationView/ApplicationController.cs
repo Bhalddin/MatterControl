@@ -107,12 +107,28 @@ namespace MatterHackers.MatterControl
 		Titillium,
 	};
 
-	public class AppContext
+	public class OpenPrintersChangedEventArgs : EventArgs
+	{
+		public OpenPrintersChangedEventArgs(PrinterConfig printer, OperationType operation)
+		{
+			this.Printer = printer;
+			this.Operation = operation;
+		}
+
+		public PrinterConfig Printer { get; }
+		public OperationType Operation { get; }
+
+		public enum OperationType { Add, Remove }
+	}
+
+	public static class AppContext
 	{
 		/// <summary>
 		/// Native platform features
 		/// </summary>
 		public static INativePlatformFeatures Platform { get; set; }
+
+		public static MatterControlOptions Options { get; set; } = new MatterControlOptions();
 
 		public static bool IsLoading { get; internal set; } = true;
 
@@ -131,16 +147,26 @@ namespace MatterHackers.MatterControl
 
 		public static Dictionary<string, IColorTheme> ThemeProviders { get; }
 
+		private static Dictionary<string, string> themes = new Dictionary<string, string>();
+
 		static AppContext()
 		{
 			ThemeProviders = new Dictionary<string, IColorTheme>();
 
 			string themesPath = Path.Combine("Themes", "System");
 
+			var staticData = AggContext.StaticData;
+
 			// Load available themes from StaticData
-			if (AggContext.StaticData.DirectoryExists(themesPath))
+			if (staticData.DirectoryExists(themesPath))
 			{
-				foreach (var directoryTheme in AggContext.StaticData.GetDirectories(themesPath).Select(d => new DirectoryTheme(d)))
+				var themeFiles = staticData.GetDirectories(themesPath).SelectMany(d => staticData.GetFiles(d).Where(p => Path.GetExtension(p) == ".json"));
+				foreach(var themeFile in themeFiles)
+				{
+					themes[Path.GetFileNameWithoutExtension(themeFile)] = themeFile;
+				}
+
+				foreach (var directoryTheme in AggContext.StaticData.GetDirectories(themesPath).Where(d => Path.GetFileName(d) != "Menus").Select(d => new DirectoryTheme(d)))
 				{
 					ThemeProviders.Add(directoryTheme.Name, directoryTheme);
 				}
@@ -168,8 +194,26 @@ namespace MatterHackers.MatterControl
 				themeset = themeProvider.GetTheme("Modern-Dark");
 			}
 
-			DefaultThumbView.ThumbColor = new Color(themeset.Theme.Colors.PrimaryTextColor, 30);
-			ActiveTheme.Instance = themeset.Theme.Colors;
+			DefaultThumbView.ThumbColor = new Color(themeset.Theme.TextColor, 30);
+		}
+
+		public static ThemeConfig LoadTheme(string themeName)
+		{
+			try
+			{
+				if (themes.TryGetValue(themeName, out string themePath))
+				{
+					string json = AggContext.StaticData.ReadAllText(themePath);
+
+					return JsonConvert.DeserializeObject<ThemeConfig>(json);
+				}
+			}
+			catch
+			{
+				Console.WriteLine("Error loading theme: " + themeName);
+			}
+
+			return new ThemeConfig();
 		}
 
 		public static void SetThemeAccentColor(Color accentColor)
@@ -196,20 +240,22 @@ namespace MatterHackers.MatterControl
 			{
 				UserSettings.Instance.set(UserSettingsKey.ActiveThemeName, themeset.Name);
 
-				//Set new user selected Default
-				ActiveTheme.Instance = themeset.Theme.Colors;
-
 				// Explicitly fire ReloadAll in response to user interaction
 				ApplicationController.Instance.ReloadAll();
 			});
+		}
+
+		public class MatterControlOptions
+		{
+			public bool McwsTestEnvironment { get; set; }
 		}
 	}
 
 	public class ApplicationController
 	{
-		public HelpArticle HelpArticles { get; set; }
+		public event EventHandler<string> ApplicationError;
 
-		private Dictionary<Type, HashSet<IObject3DEditor>> objectEditorsByType;
+		public HelpArticle HelpArticles { get; set; }
 
 		public ThemeConfig Theme => AppContext.Theme;
 
@@ -217,8 +263,12 @@ namespace MatterHackers.MatterControl
 
 		public RunningTasksConfig Tasks { get; set; } = new RunningTasksConfig();
 
+		public IReadOnlyList<PrinterConfig> ActivePrinters => _activePrinters;
+
 		// A list of printers which are open (i.e. displaying a tab) on this instance of MatterControl
-		public IEnumerable<PrinterConfig> ActivePrinters { get; } = new List<PrinterConfig>();
+		private List<PrinterConfig> _activePrinters = new List<PrinterConfig>();
+
+		private Dictionary<Type, HashSet<IObject3DEditor>> objectEditorsByType;
 
 		public PopupMenu GetActionMenuForSceneItem(IObject3D selectedItem, InteractiveScene scene, bool addInSubmenu)
 		{
@@ -294,12 +344,44 @@ namespace MatterHackers.MatterControl
 			return popupMenu;
 		}
 
+		internal void ExportAsMatterControlConfig(PrinterConfig printer)
+		{
+			AggContext.FileDialogs.SaveFileDialog(
+				new SaveFileDialogParams("MatterControl Printer Export|*.printer", title: "Export Printer Settings")
+				{
+					FileName = printer.Settings.GetValue(SettingsKey.printer_name)
+				},
+				(saveParams) =>
+				{
+					try
+					{
+						if (!string.IsNullOrWhiteSpace(saveParams.FileName))
+						{
+							File.WriteAllText(saveParams.FileName, JsonConvert.SerializeObject(printer.Settings, Formatting.Indented));
+						}
+					}
+					catch (Exception e)
+					{
+						UiThread.RunOnIdle(() =>
+						{
+							StyledMessageBox.ShowMessageBox(e.Message, "Couldn't save file".Localize());
+						});
+					}
+				});
+		}
+
+		public void LogError(string errorMessage)
+		{
+			this.ApplicationError?.Invoke(this, errorMessage);
+		}
+
 		// TODO: Any references to this property almost certainly need to be reconsidered. ActiveSliceSettings static references that assume a single printer
 		// selection are being redirected here. This allows us to break the dependency to the original statics and consolidates
 		// us down to a single point where code is making assumptions about the presence of a printer, printer counts, etc. If we previously checked for
 		// PrinterConnection.IsPrinterConnected, that could should be updated to iterate ActiverPrinters, checking each one and acting on each as it would
 		// have for the single case
-		public PrinterConfig ActivePrinter { get; private set; } = PrinterConfig.EmptyPrinter;
+		[Obsolete("ActivePrinter references should be migrated to logic than supports multi-printer mode")]
+		public PrinterConfig ActivePrinter => this.ActivePrinters.FirstOrDefault() ?? PrinterConfig.EmptyPrinter;
 
 		public Action RedeemDesignCode;
 		public Action EnterShareCode;
@@ -309,10 +391,8 @@ namespace MatterHackers.MatterControl
 		public RootedObjectEventHandler CloudSyncStatusChanged = new RootedObjectEventHandler();
 		public RootedObjectEventHandler DoneReloadingAll = new RootedObjectEventHandler();
 		public RootedObjectEventHandler ActiveProfileModified = new RootedObjectEventHandler();
-		public RootedObjectEventHandler ActivePrinterChanged = new RootedObjectEventHandler();
 
-		public static Action SignInAction;
-		public static Action SignOutAction;
+		public event EventHandler<OpenPrintersChangedEventArgs> OpenPrintersChanged;
 
 		public static Action WebRequestFailed;
 		public static Action WebRequestSucceeded;
@@ -329,66 +409,9 @@ namespace MatterHackers.MatterControl
 
 		public static Func<string, Task<Dictionary<string, string>>> GetProfileHistory;
 
-		public async Task SetActivePrinter(PrinterConfig printer, bool allowChangedEvent = true)
+		public void OnOpenPrintersChanged(OpenPrintersChangedEventArgs e)
 		{
-			var initialPrinter = this.ActivePrinter;
-			if (initialPrinter?.Settings.ID != printer.Settings.ID)
-			{
-				// TODO: Consider if autosave is appropriate
-				if (initialPrinter != PrinterConfig.EmptyPrinter)
-				{
-					await ApplicationController.Instance.Tasks.Execute("Saving".Localize(), initialPrinter.Bed.SaveChanges);
-				}
-
-				// If we have an active printer, run Disable
-				if (initialPrinter.Settings != PrinterSettings.Empty)
-				{
-					initialPrinter?.Connection?.Disable();
-				}
-
-				// ActivePrinters is IEnumerable to force us to use SetActivePrinter until it's ingrained in our pattern
-				// Cast to list since it is one and we need to clear and add
-				if (this.ActivePrinters is List<PrinterConfig> activePrinterList)
-				{
-					activePrinterList.Clear();
-					activePrinterList.Add(printer);
-
-					this.ActivePrinter = printer;
-				}
-
-				// TODO: Decide if non-printer contexts should prompt for a printer, if we should have a default printer, or get "ActiveTab printer" working
-				// HACK: short term solution to resolve printer reference for non-printer related contexts
-				DragDropData.Printer = printer;
-
-				BedSettings.SetMakeAndModel(
-					printer.Settings.GetValue(SettingsKey.make),
-					printer.Settings.GetValue(SettingsKey.model));
-
-				if (allowChangedEvent)
-				{
-					this.OnActivePrinterChanged(null);
-				}
-
-				if (!AppContext.IsLoading
-					&& printer.Settings.PrinterSelected
-					&& printer.Settings.GetValue<bool>(SettingsKey.auto_connect))
-				{
-					UiThread.RunOnIdle(() =>
-					{
-						printer.Settings.printer.Connection.Connect();
-					}, 2);
-				}
-
-				if (this.Library != null)
-				{
-					this.Library.NotifyContainerChanged();
-				}
-			}
-		}
-
-		public void OnActivePrinterChanged(EventArgs e)
-		{
-			this.ActivePrinterChanged.CallEvents(null, e);
+			this.OpenPrintersChanged?.Invoke(this, e);
 		}
 
 		public string GetFavIconUrl(string oemName)
@@ -397,12 +420,19 @@ namespace MatterHackers.MatterControl
 			return "https://www.google.com/s2/favicons?domain=" + (string.IsNullOrWhiteSpace(oemUrl) ? "www.matterhackers.com" : oemUrl);
 		}
 
-		public async Task ClearActivePrinter(bool allowChangedEvent = true)
+		public void ClosePrinter(PrinterConfig printer, bool allowChangedEvent = true)
 		{
 			// Actually clear printer
-			ProfileManager.Instance.LastProfileID = "";
+			ProfileManager.Instance.ClosePrinter(printer.Settings.ID);
 
-			await this.SetActivePrinter(PrinterConfig.EmptyPrinter, allowChangedEvent);
+			_activePrinters.Remove(printer);
+
+			if (allowChangedEvent)
+			{
+				this.OnOpenPrintersChanged(new OpenPrintersChangedEventArgs(printer, OpenPrintersChangedEventArgs.OperationType.Remove));
+			}
+
+			printer.Dispose();
 		}
 
 		public void LaunchBrowser(string targetUri)
@@ -424,28 +454,6 @@ namespace MatterHackers.MatterControl
 				}
 				Process.Start(targetUri);
 			});
-		}
-
-		public void RefreshActiveInstance(PrinterSettings updatedPrinterSettings)
-		{
-			ActivePrinter.SwapToSettings(updatedPrinterSettings);
-
-			/*
-			// TODO: Should we rebroadcast settings changed events for each settings?
-			bool themeChanged = ActivePrinter.Settings.GetValue(SettingsKey.active_theme_name) != updatedProfile.GetValue(SettingsKey.active_theme_name);
-			PrinterSettings.SettingChanged.CallEvents(null, new StringEventArgs(SettingsKey.printer_name));
-
-			// TODO: Decide if non-printer contexts should prompt for a printer, if we should have a default printer, or get "ActiveTab printer" working
-			// HACK: short term solution to resolve printer reference for non-printer related contexts
-			DragDropData.Printer = printer;
-			if (themeChanged)
-			{
-				UiThread.RunOnIdle(ActiveSliceSettings.SwitchToPrinterTheme);
-			}
-			else
-			{
-				UiThread.RunOnIdle(ApplicationController.Instance.ReloadAdvancedControlsPanel);
-			}*/
 		}
 
 		internal void MakeGrayscale(ImageBuffer sourceImage)
@@ -496,7 +504,7 @@ namespace MatterHackers.MatterControl
 
 		public SlicePresetsPage EditQualityPresetsWindow { get; set; }
 
-		public GuiWidget MainView;
+		public MainViewWidget MainView;
 
 		private EventHandler unregisterEvents;
 
@@ -515,8 +523,9 @@ namespace MatterHackers.MatterControl
 					OperationType = typeof(GroupObject3D),
 
 					TitleResolver = () => "Group".Localize(),
-					Action = (scene) =>
+					Action = (sceneContext) =>
 					{
+						var scene = sceneContext.Scene;
 						var selectedItem = scene.SelectedItem;
 						scene.SelectedItem = null;
 
@@ -552,7 +561,7 @@ namespace MatterHackers.MatterControl
 				new SceneSelectionOperation()
 				{
 					TitleResolver = () => "Ungroup".Localize(),
-					Action = (scene) => scene.UngroupSelection(),
+					Action = (sceneContext) => sceneContext.Scene.UngroupSelection(),
 					IsEnabled = (scene) =>
 					{
 						var selectedItem = scene.SelectedItem;
@@ -570,14 +579,14 @@ namespace MatterHackers.MatterControl
 				new SceneSelectionOperation()
 				{
 					TitleResolver = () => "Duplicate".Localize(),
-					Action = (scene) => scene.DuplicateItem(5),
+					Action = (sceneContext) => sceneContext.DuplicateItem(5),
 					IsEnabled = (scene) => scene.SelectedItem != null,
 					Icon = AggContext.StaticData.LoadIcon("duplicate.png").SetPreMultiply(),
 				},
 				new SceneSelectionOperation()
 				{
 					TitleResolver = () => "Remove".Localize(),
-					Action = (scene) => scene.DeleteSelection(),
+					Action = (sceneContext) => sceneContext.Scene.DeleteSelection(),
 					IsEnabled = (scene) => scene.SelectedItem != null,
 					Icon = AggContext.StaticData.LoadIcon("remove.png").SetPreMultiply(),
 				},
@@ -586,8 +595,9 @@ namespace MatterHackers.MatterControl
 				{
 					OperationType = typeof(AlignObject3D),
 					TitleResolver = () => "Align".Localize(),
-					Action = (scene) =>
+					Action = (sceneContext) =>
 					{
+						var scene = sceneContext.Scene;
 						var selectedItem = scene.SelectedItem;
 						var align = new AlignObject3D();
 						align.AddSelectionAsChildren(scene, selectedItem);
@@ -599,8 +609,9 @@ namespace MatterHackers.MatterControl
 				new SceneSelectionOperation()
 				{
 					TitleResolver = () => "Lay Flat".Localize(),
-					Action = (scene) =>
+					Action = (sceneContext) =>
 					{
+						var scene = sceneContext.Scene;
 						var selectedItem = scene.SelectedItem;
 						if (selectedItem != null)
 						{
@@ -613,8 +624,9 @@ namespace MatterHackers.MatterControl
 				new SceneSelectionOperation()
 				{
 					TitleResolver = () => "Make Support".Localize(),
-					Action = (scene) =>
+					Action = (sceneContext) =>
 					{
+						var scene = sceneContext.Scene;
 						if (scene.SelectedItem != null
 							&& !scene.SelectedItem.VisibleMeshes().All(i => i.OutputType == PrintOutputTypes.Support))
 						{
@@ -629,7 +641,7 @@ namespace MatterHackers.MatterControl
 				{
 					OperationType = typeof(CombineObject3D),
 					TitleResolver = () => "Combine".Localize(),
-					Action = (scene) => new CombineObject3D().WrapSelectedItemAndSelect(scene),
+					Action = (sceneContext) => new CombineObject3D().WrapSelectedItemAndSelect(sceneContext.Scene),
 					Icon = AggContext.StaticData.LoadIcon("combine.png").SetPreMultiply(),
 					IsEnabled = (scene) => scene.SelectedItem is SelectionGroupObject3D,
 				},
@@ -637,7 +649,7 @@ namespace MatterHackers.MatterControl
 				{
 					OperationType = typeof(SubtractObject3D),
 					TitleResolver = () => "Subtract".Localize(),
-					Action = (scene) => new SubtractObject3D().WrapSelectedItemAndSelect(scene),
+					Action = (sceneContext) => new SubtractObject3D().WrapSelectedItemAndSelect(sceneContext.Scene),
 					Icon = AggContext.StaticData.LoadIcon("subtract.png").SetPreMultiply(),
 					IsEnabled = (scene) => scene.SelectedItem is SelectionGroupObject3D,
 				},
@@ -645,7 +657,7 @@ namespace MatterHackers.MatterControl
 				{
 					OperationType = typeof(IntersectionObject3D),
 					TitleResolver = () => "Intersect".Localize(),
-					Action = (scene) => new IntersectionObject3D().WrapSelectedItemAndSelect(scene),
+					Action = (sceneContext) => new IntersectionObject3D().WrapSelectedItemAndSelect(sceneContext.Scene),
 					Icon = AggContext.StaticData.LoadIcon("intersect.png"),
 					IsEnabled = (scene) => scene.SelectedItem is SelectionGroupObject3D,
 				},
@@ -653,7 +665,7 @@ namespace MatterHackers.MatterControl
 				{
 					OperationType = typeof(SubtractAndReplaceObject3D),
 					TitleResolver = () => "Subtract & Replace".Localize(),
-					Action = (scene) => new SubtractAndReplaceObject3D().WrapSelectedItemAndSelect(scene),
+					Action = (sceneContext) => new SubtractAndReplaceObject3D().WrapSelectedItemAndSelect(sceneContext.Scene),
 					Icon = AggContext.StaticData.LoadIcon("subtract_and_replace.png").SetPreMultiply(),
 					IsEnabled = (scene) => scene.SelectedItem is SelectionGroupObject3D,
 				},
@@ -662,10 +674,10 @@ namespace MatterHackers.MatterControl
 				{
 					OperationType = typeof(ArrayLinearObject3D),
 					TitleResolver = () => "Linear Array".Localize(),
-					Action = (scene) =>
+					Action = (sceneContext) =>
 					{
 						var array = new ArrayLinearObject3D();
-						array.AddSelectionAsChildren(scene, scene.SelectedItem);
+						array.AddSelectionAsChildren(sceneContext.Scene, sceneContext.Scene.SelectedItem);
 						array.Invalidate(new InvalidateArgs(array, InvalidateType.Properties, null));
 					},
 					Icon = AggContext.StaticData.LoadIcon("array_linear.png").SetPreMultiply(),
@@ -675,10 +687,10 @@ namespace MatterHackers.MatterControl
 				{
 					OperationType = typeof(ArrayRadialObject3D),
 					TitleResolver = () => "Radial Array".Localize(),
-					Action = (scene) =>
+					Action = (sceneContext) =>
 					{
 						var array = new ArrayRadialObject3D();
-						array.AddSelectionAsChildren(scene, scene.SelectedItem);
+						array.AddSelectionAsChildren(sceneContext.Scene, sceneContext.Scene.SelectedItem);
 						array.Invalidate(new InvalidateArgs(array, InvalidateType.Properties, null));
 					},
 					Icon = AggContext.StaticData.LoadIcon("array_radial.png").SetPreMultiply(),
@@ -688,10 +700,10 @@ namespace MatterHackers.MatterControl
 				{
 					OperationType = typeof(ArrayAdvancedObject3D),
 					TitleResolver = () => "Advanced Array".Localize(),
-					Action = (scene) =>
+					Action = (sceneContext) =>
 					{
 						var array = new ArrayAdvancedObject3D();
-						array.AddSelectionAsChildren(scene, scene.SelectedItem);
+						array.AddSelectionAsChildren(sceneContext.Scene, sceneContext.Scene.SelectedItem);
 						array.Invalidate(new InvalidateArgs(array, InvalidateType.Properties, null));
 					},
 					Icon = AggContext.StaticData.LoadIcon("array_advanced.png").SetPreMultiply(),
@@ -702,10 +714,10 @@ namespace MatterHackers.MatterControl
 				{
 					OperationType = typeof(PinchObject3D),
 					TitleResolver = () => "Pinch".Localize(),
-					Action = (scene) =>
+					Action = (sceneContext) =>
 					{
 						var pinch = new PinchObject3D();
-						pinch.WrapSelectedItemAndSelect(scene);
+						pinch.WrapSelectedItemAndSelect(sceneContext.Scene);
 					},
 					Icon = AggContext.StaticData.LoadIcon("pinch.png", 16, 16, theme.InvertIcons),
 					IsEnabled = (scene) => scene.SelectedItem != null,
@@ -714,10 +726,10 @@ namespace MatterHackers.MatterControl
 				{
 					OperationType = typeof(CurveObject3D),
 					TitleResolver = () => "Curve".Localize(),
-					Action = (scene) =>
+					Action = (sceneContext) =>
 					{
 						var curve = new CurveObject3D();
-						curve.WrapSelectedItemAndSelect(scene);
+						curve.WrapSelectedItemAndSelect(sceneContext.Scene);
 					},
 					Icon = AggContext.StaticData.LoadIcon("curve.png", 16, 16, theme.InvertIcons),
 					IsEnabled = (scene) => scene.SelectedItem != null,
@@ -726,8 +738,9 @@ namespace MatterHackers.MatterControl
 				{
 					OperationType = typeof(FitToBoundsObject3D_2),
 					TitleResolver = () => "Fit to Bounds".Localize(),
-					Action = (scene) =>
+					Action = (sceneContext) =>
 					{
+						var scene = sceneContext.Scene;
 						var selectedItem = scene.SelectedItem;
 						scene.SelectedItem = null;
 						var fit = FitToBoundsObject3D_2.Create(selectedItem.Clone());
@@ -764,12 +777,21 @@ namespace MatterHackers.MatterControl
 			operationIconsByType.Add(typeof(ImageObject3D), () => AggContext.StaticData.LoadIcon("140.png", 16, 16, theme.InvertIcons));
 		}
 
+		public void OpenIntoNewTab(IEnumerable<ILibraryItem> selectedLibraryItems)
+		{
+			this.MainView.CreatePartTab().ContinueWith(task =>
+			{
+				var workspace = this.Workspaces.Last();
+				workspace.SceneContext.AddToPlate(selectedLibraryItems);
+			});
+		}
+
 		internal void BlinkTab(ITab tab)
 		{
 			var theme = this.Theme;
 			if (tab is GuiWidget guiWidget)
 			{
-				guiWidget.Descendants<TextWidget>().FirstOrDefault().FlashBackground(theme.PrimaryAccentColor.WithContrast(theme.Colors.PrimaryTextColor, 6).ToColor());
+				guiWidget.Descendants<TextWidget>().FirstOrDefault().FlashBackground(theme.PrimaryAccentColor.WithContrast(theme.TextColor, 6).ToColor());
 			}
 		}
 
@@ -888,21 +910,6 @@ namespace MatterHackers.MatterControl
 				}
 			}
 
-			this.Library.RegisterContainer(
-				new DynamicContainerLink(
-						() => "SD Card".Localize(),
-						AggContext.StaticData.LoadIcon(Path.Combine("Library", "sd_20x20.png")),
-						AggContext.StaticData.LoadIcon(Path.Combine("Library", "sd_folder.png")),
-						() => new SDCardContainer(),
-						() =>
-						{
-							var printer = this.ActivePrinter;
-							return printer.Settings.GetValue<bool>(SettingsKey.has_sd_card_reader);
-						})
-				{
-					IsReadOnly = true
-				});
-
 			this.Library.PlatingHistory = new PlatingHistoryContainer();
 
 			this.Library.RegisterContainer(
@@ -911,6 +918,47 @@ namespace MatterHackers.MatterControl
 					AggContext.StaticData.LoadIcon(Path.Combine("Library", "history_20x20.png")),
 					AggContext.StaticData.LoadIcon(Path.Combine("Library", "history_folder.png")),
 					() => new RootHistoryContainer()));
+		}
+
+		public void ExportLibraryItems(IEnumerable<ILibraryItem> libraryItems, bool centerOnBed = true, PrinterConfig printer = null)
+		{
+			UiThread.RunOnIdle(() =>
+			{
+				if (printer != null || this.ActivePrinters.Count == 1)
+				{
+					// If unspecified but count is one, select the one active printer
+					if (printer == null)
+					{
+						printer = this.ActivePrinters.First();
+					}
+
+					DialogWindow.Show(
+						new ExportPrintItemPage(libraryItems, centerOnBed, printer));
+				}
+				else
+				{
+					// Resolve printer context before showing export page
+					DialogWindow dialogWindow = null;
+
+					dialogWindow = DialogWindow.Show(
+						new SelectPrinterProfilePage(
+							"Next".Localize(),
+							(selectedPrinter) =>
+							{
+								var historyContainer = ApplicationController.Instance.Library.PlatingHistory;
+
+								selectedPrinter.Bed.LoadEmptyContent(
+									new EditContext()
+									{
+										ContentStore = historyContainer,
+										SourceItem = historyContainer.NewPlatingItem()
+									});
+
+								dialogWindow.ChangeToPage(
+									new ExportPrintItemPage(libraryItems, centerOnBed, selectedPrinter));
+							}));
+				}
+			});
 		}
 
 		public static IObject3D SelectionAsSingleClone(IObject3D selection)
@@ -938,6 +986,11 @@ namespace MatterHackers.MatterControl
 		public ApplicationController()
 		{
 			this.Thumbnails = new ThumbnailsConfig();
+
+			ProfileManager.UserChanged += (s, e) =>
+			{
+				_activePrinters = new List<PrinterConfig>();
+			};
 
 			this.RebuildSceneOperations(this.Theme);
 
@@ -1104,7 +1157,6 @@ namespace MatterHackers.MatterControl
 				},
 				iconCollector: (theme) => AggContext.StaticData.LoadIcon("scale_32x32.png", 16, 16, theme.InvertIcons));
 
-
 			this.Graph.RegisterOperation(
 				typeof(IObject3D),
 				typeof(ScaleObject3D),
@@ -1221,112 +1273,64 @@ namespace MatterHackers.MatterControl
 				isVisible: (sceneItem) => sceneItem.Children.Any((i) => i is IPathObject),
 				iconCollector: (theme) => AggContext.StaticData.LoadIcon("noun_55060.png", theme.InvertIcons));
 
+			this.InitializeLibrary();
 
-			PrinterSettings.SettingChanged.RegisterEvent((s, e) =>
+			HashSet<IObject3DEditor> mappedEditors;
+			objectEditorsByType = new Dictionary<Type, HashSet<IObject3DEditor>>();
+
+			// Initialize plugins, passing the MatterControl assembly as the only non-dll instance
+			//PluginFinder.Initialize(Assembly.GetExecutingAssembly());
+
+			foreach (IObject3DEditor editor in PluginFinder.CreateInstancesOf<IObject3DEditor>())
 			{
-				if (e is StringEventArgs stringArg
-					&& SettingsOrganizer.SettingsData.TryGetValue(stringArg.Data, out SliceSettingData settingsData)
-					&& settingsData.ReloadUiWhenChanged)
+				foreach (Type type in editor.SupportedTypes())
 				{
-					UiThread.RunOnIdle(ReloadAll);
-				}
-			}, ref unregisterEvents);
-
-			bool waitingForBedHeat = false;
-			bool waitingForExtruderHeat = false;
-			double heatDistance = 0;
-			double heatStart = 0;
-
-			// show temperature heating for m109 and m190
-			PrinterConnection.AnyCommunicationStateChanged.RegisterEvent((s, e) =>
-			{
-				var printerConnection = this.ActivePrinter.Connection;
-
-				if (printerConnection.PrinterIsPrinting || printerConnection.PrinterIsPaused)
-				{
-					switch (printerConnection.DetailedPrintingState)
+					if (!objectEditorsByType.TryGetValue(type, out mappedEditors))
 					{
-						case DetailedPrintingState.HeatingBed:
-							Tasks.Execute(
-								"Heating Bed".Localize(),
-								(reporter, cancellationToken) =>
-								{
-									waitingForBedHeat = true;
-									waitingForExtruderHeat = false;
-
-									var progressStatus = new ProgressStatus();
-									heatStart = printerConnection.ActualBedTemperature;
-									heatDistance = Math.Abs(printerConnection.TargetBedTemperature - heatStart);
-
-									while (heatDistance > 0 && waitingForBedHeat)
-									{
-										var remainingDistance = Math.Abs(printerConnection.TargetBedTemperature - printerConnection.ActualBedTemperature);
-										progressStatus.Status = $"Heating Bed ({printerConnection.ActualBedTemperature:0}/{printerConnection.TargetBedTemperature:0})";
-										progressStatus.Progress0To1 = (heatDistance - remainingDistance) / heatDistance;
-										reporter.Report(progressStatus);
-										Thread.Sleep(10);
-									}
-
-									return Task.CompletedTask;
-								},
-								new RunningTaskOptions()
-								{
-									ReadOnlyReporting = true
-								});
-							break;
-
-						case DetailedPrintingState.HeatingExtruder:
-							Tasks.Execute(
-								"Heating Extruder".Localize(),
-								(reporter, cancellationToken) =>
-								{
-									waitingForBedHeat = false;
-									waitingForExtruderHeat = true;
-
-									var progressStatus = new ProgressStatus();
-
-									heatStart = printerConnection.GetActualHotendTemperature(0);
-									heatDistance = Math.Abs(printerConnection.GetTargetHotendTemperature(0) - heatStart);
-
-									while (heatDistance > 0 && waitingForExtruderHeat)
-									{
-										var currentDistance = Math.Abs(printerConnection.GetTargetHotendTemperature(0) - printerConnection.GetActualHotendTemperature(0));
-										progressStatus.Progress0To1 = (heatDistance - currentDistance) / heatDistance;
-										progressStatus.Status = $"Heating Extruder ({printerConnection.GetActualHotendTemperature(0):0}/{printerConnection.GetTargetHotendTemperature(0):0})";
-										reporter.Report(progressStatus);
-										Thread.Sleep(1000);
-									}
-
-									return Task.CompletedTask;
-								},
-								new RunningTaskOptions()
-								{
-									ReadOnlyReporting = true
-								});
-							break;
-
-						case DetailedPrintingState.HomingAxis:
-						case DetailedPrintingState.Printing:
-						default:
-							// clear any existing waiting states
-							waitingForBedHeat = false;
-							waitingForExtruderHeat = false;
-							break;
+						mappedEditors = new HashSet<IObject3DEditor>();
+						objectEditorsByType.Add(type, mappedEditors);
 					}
-				}
-				else
-				{
-					// turn of any running temp feedback tasks
-					waitingForBedHeat = false;
-					waitingForExtruderHeat = false;
-				}
-			}, ref unregisterEvent);
 
-			// show countdown for turning off heat if required
-			PrinterConnection.TemporarilyHoldingTemp.RegisterEvent((s, e) =>
+					mappedEditors.Add(editor);
+				}
+			}
+		}
+
+		public void Connection_ErrorReported(object sender, string line)
+		{
+			if (line != null)
 			{
-				var printerConnection = this.ActivePrinter.Connection;
+				string message = "Your printer is reporting a HARDWARE ERROR and has been paused. Check the error and cancel the print if required.".Localize()
+					+ "\n"
+					+ "\n"
+					+ "Error Reported".Localize() + ":"
+					+ $" \"{line}\".";
 
+				if (sender is PrinterConnection printerConnection)
+				{
+					UiThread.RunOnIdle(() =>
+						StyledMessageBox.ShowMessageBox(
+							(clickedOk) =>
+							{
+								if (clickedOk && printerConnection.PrinterIsPaused)
+								{
+									printerConnection.Resume();
+								}
+							},
+							message,
+							"Printer Hardware Error".Localize(),
+							StyledMessageBox.MessageType.YES_NO,
+							"Resume".Localize(),
+							"OK".Localize())
+					);
+				}
+			}
+		}
+
+		public void Connection_TemporarilyHoldingTemp(object sender, EventArgs e)
+		{
+			if (sender is PrinterConnection printerConnection)
+			{
 				if (printerConnection.AnyHeatIsOn)
 				{
 					var paused = false;
@@ -1388,63 +1392,6 @@ namespace MatterHackers.MatterControl
 						StopToolTip = "Immediately turn off heaters".Localize()
 					});
 				}
-			}, ref unregisterEvents);
-
-			PrinterConnection.ErrorReported.RegisterEvent((s, e) =>
-			{
-				var foundStringEventArgs = e as FoundStringEventArgs;
-				if (foundStringEventArgs != null)
-				{
-					string message = "Your printer is reporting a HARDWARE ERROR and has been paused. Check the error and cancel the print if required.".Localize()
-						+ "\n"
-						+ "\n"
-						+ "Error Reported".Localize() + ":"
-						+ $" \"{foundStringEventArgs.LineToCheck}\".";
-					UiThread.RunOnIdle(() =>
-						StyledMessageBox.ShowMessageBox((clickedOk) =>
-						{
-							if (clickedOk && this.ActivePrinter.Connection.PrinterIsPaused)
-							{
-								this.ActivePrinter.Connection.Resume();
-							}
-						}, message, "Printer Hardware Error".Localize(), StyledMessageBox.MessageType.YES_NO, "Resume".Localize(), "OK".Localize())
-					);
-				}
-			}, ref unregisterEvent);
-
-			this.InitializeLibrary();
-
-			PrinterConnection.AnyConnectionSucceeded.RegisterEvent((s, e) =>
-			{
-				// run the print leveling wizard if we need to for this printer
-				var printer = this.ActivePrinters.Where(p => p.Connection == s).FirstOrDefault();
-				if (printer != null)
-				{
-					UiThread.RunOnIdle(() =>
-					{
-						this.RunAnyRequiredPrinterSetup(printer, this.Theme);
-					});
-				}
-			}, ref unregisterEvents);
-
-			HashSet<IObject3DEditor> mappedEditors;
-			objectEditorsByType = new Dictionary<Type, HashSet<IObject3DEditor>>();
-
-			// Initialize plugins, passing the MatterControl assembly as the only non-dll instance
-			//PluginFinder.Initialize(Assembly.GetExecutingAssembly());
-
-			foreach (IObject3DEditor editor in PluginFinder.CreateInstancesOf<IObject3DEditor>())
-			{
-				foreach (Type type in editor.SupportedTypes())
-				{
-					if (!objectEditorsByType.TryGetValue(type, out mappedEditors))
-					{
-						mappedEditors = new HashSet<IObject3DEditor>();
-						objectEditorsByType.Add(type, mappedEditors);
-					}
-
-					mappedEditors.Add(editor);
-				}
 			}
 		}
 
@@ -1455,17 +1402,27 @@ namespace MatterHackers.MatterControl
 			{
 				UiThread.RunOnIdle(() =>
 				{
-					LevelingWizard.ShowProbeCalibrationWizard(printer, theme);
+					ProbeCalibrationWizard.Start(printer, theme);
 				});
 				return true;
 			}
 
 			// run the leveling wizard if we need to
-			if (PrintLevelingData.NeedsToBeRun(printer))
+			if (LevelingValidation.NeedsToBeRun(printer))
 			{
 				UiThread.RunOnIdle(() =>
 				{
-					LevelingWizard.ShowPrintLevelWizard(printer, theme);
+					PrintLevelingWizard.Start(printer, theme);
+				});
+				return true;
+			}
+
+			// run load filament if we need to
+			if (LoadFilamentWizard.NeedsToBeRun(printer))
+			{
+				UiThread.RunOnIdle(() =>
+				{
+					LoadFilamentWizard.Start(printer, theme, false);
 				});
 				return true;
 			}
@@ -1496,7 +1453,7 @@ namespace MatterHackers.MatterControl
 			return mappedEditors;
 		}
 
-		internal void Shutdown()
+		public void Shutdown()
 		{
 			// Ensure all threads shutdown gracefully on close
 
@@ -1680,9 +1637,10 @@ namespace MatterHackers.MatterControl
 				UiThread.RunOnIdle(() =>
 				{
 					GuiWidget.LayoutCount = 0;
+
 					using (new QuickTimer($"ReloadAll_{reloadCount++}:"))
 					{
-						MainView = new PartPreviewContent(ApplicationController.Instance.Theme);
+						MainView = new MainViewWidget(ApplicationController.Instance.Theme);
 						this.DoneReloadingAll?.CallEvents(null, null);
 
 						using (new QuickTimer("Time to AddMainview: "))
@@ -1691,6 +1649,7 @@ namespace MatterHackers.MatterControl
 							AppContext.RootSystemWindow.AddChild(MainView);
 						}
 					}
+
 					Debug.WriteLine($"LayoutCount: {GuiWidget.LayoutCount:0.0}");
 
 					this.IsReloading = false;
@@ -1703,13 +1662,6 @@ namespace MatterHackers.MatterControl
 		public async void OnApplicationClosed()
 		{
 			this.Thumbnails.Shutdown();
-
-			// Save changes before close
-			if (this.ActivePrinter != null
-				&& this.ActivePrinter != PrinterConfig.EmptyPrinter)
-			{
-				await this.ActivePrinter.Bed.SaveChanges(null, CancellationToken.None);
-			}
 
 			ApplicationSettings.Instance.ReleaseClientToken();
 		}
@@ -1729,8 +1681,6 @@ namespace MatterHackers.MatterControl
 
 		public DragDropData DragDropData { get; set; } = new DragDropData();
 
-		public string PrintingItemName { get; set; }
-
 		public string ShortProductName => "MatterControl";
 		public string ProductName => "MatterHackers: MatterControl";
 
@@ -1749,23 +1699,17 @@ namespace MatterHackers.MatterControl
 			// Show the End User License Agreement if it has not been shown (on windows it is shown in the installer)
 			if (AggContext.OperatingSystem != OSType.Windows)
 			{
+				// *********************************************************************************
+				// TODO: This should happen much earlier in the process and we should conditionally
+				//       show License page or RootSystemWindow
+				// *********************************************************************************
+				//
 				// Make sure this window is show modal (if available)
 				// show this last so it is on top
 				if (UserSettings.Instance.get(UserSettingsKey.SoftwareLicenseAccepted) != "true")
 				{
 					UiThread.RunOnIdle(() => DialogWindow.Show<LicenseAgreementPage>());
 				}
-			}
-
-			if (this.ActivePrinter is PrinterConfig printer
-				&& printer.Settings.PrinterSelected
-				&& printer.Settings.GetValue<bool>(SettingsKey.auto_connect))
-			{
-				UiThread.RunOnIdle(() =>
-				{
-					//PrinterConnectionAndCommunication.Instance.HaltConnectionThread();
-					printer.Connection.Connect();
-				}, 2);
 			}
 
 			if (AssetObject3D.AssetManager == null)
@@ -1801,38 +1745,15 @@ namespace MatterHackers.MatterControl
 
 			CloudSyncStatusChanged.CallEvents(this, new CloudSyncEventArgs() { IsAuthenticated = userAuthenticated });
 
-			// Only fire UserChanged if it actually happened - prevents runaway positive feedback loop
 			if (!string.IsNullOrEmpty(AuthenticationData.Instance.ActiveSessionUsername)
 				&& AuthenticationData.Instance.ActiveSessionUsername != AuthenticationData.Instance.LastSessionUsername)
 			{
-				// only set it if it is an actual user name
 				AuthenticationData.Instance.LastSessionUsername = AuthenticationData.Instance.ActiveSessionUsername;
 			}
 
-			UiThread.RunOnIdle(this.UserChanged);
-		}
-
-		// Called after every startup and at the completion of every authentication change
-		public void UserChanged()
-		{
+			// TODO: Unclear why we'd reload on status change - it seems like this state should be managed entirely from ProfileManager and removed from this location
 			ProfileManager.ReloadActiveUser();
-
-			// Ensure SQLite printers are imported
-			ProfileManager.Instance.EnsurePrintersImported();
-
-			var guest = ProfileManager.Load("guest");
-
-			// If profiles.json was created, run the import wizard to pull in any SQLite printers
-			if (guest?.Profiles?.Any() == true
-				&& !ProfileManager.Instance.IsGuestProfile
-				&& !ProfileManager.Instance.PrintersImported)
-			{
-				// Show the import printers wizard
-				DialogWindow.Show<CopyGuestProfilesToUser>();
-			}
 		}
-
-		private EventHandler unregisterEvent;
 
 		public Stream LoadHttpAsset(string url)
 		{
@@ -1851,6 +1772,45 @@ namespace MatterHackers.MatterControl
 				File.WriteAllBytes(cachePath, bytes);
 
 				return new MemoryStream(bytes);
+			}
+		}
+
+		public async Task<PrinterConfig> OpenPrinter(string printerID, bool loadPlateFromHistory = true)
+		{
+			if (!_activePrinters.Any(p => p.Settings.ID == printerID))
+			{
+				ProfileManager.Instance.OpenPrinter(printerID);
+
+				var printer = new PrinterConfig(await ProfileManager.LoadSettingsAsync(printerID));
+
+				_activePrinters.Add(printer);
+
+				if (loadPlateFromHistory)
+				{
+					await printer.Bed.LoadPlateFromHistory();
+				}
+
+				this.OnOpenPrintersChanged(new OpenPrintersChangedEventArgs(printer, OpenPrintersChangedEventArgs.OperationType.Add));
+
+				if (printer.Settings.PrinterSelected
+					&& printer.Settings.GetValue<bool>(SettingsKey.auto_connect))
+				{
+					printer.Connection.Connect();
+				}
+
+				return printer;
+			}
+
+			return PrinterConfig.EmptyPrinter;
+		}
+
+		public async Task OpenAllPrinters()
+		{
+			// TODO: broadcast message to UI to close all printer tabs
+
+			foreach (var printerID in ProfileManager.Instance.OpenPrinterIDs)
+			{
+				await this.OpenPrinter(printerID);
 			}
 		}
 
@@ -2000,34 +1960,6 @@ namespace MatterHackers.MatterControl
 		}
 
 		/// <summary>
-		/// Cancels prints within the first two minutes or interactively prompts the user to confirm cancellation
-		/// </summary>
-		/// <returns>A boolean value indicating if the print was canceled</returns>
-		public void ConditionallyCancelPrint()
-		{
-			if (this.ActivePrinter.Connection.SecondsPrinted > 120)
-			{
-				StyledMessageBox.ShowMessageBox(
-					(bool response) =>
-					{
-						if (response)
-						{
-							UiThread.RunOnIdle(() => this.ActivePrinter.Connection.Stop());
-						}
-					},
-					"Cancel the current print?".Localize(),
-					"Cancel Print?".Localize(),
-					StyledMessageBox.MessageType.YES_NO,
-					"Cancel Print".Localize(),
-					"Continue Printing".Localize());
-			}
-			else
-			{
-				this.ActivePrinter.Connection.Stop();
-			}
-		}
-
-		/// <summary>
 		/// Register the given PrintItemAction into the named section
 		/// </summary>
 		/// <param name="section">The section to register in</param>
@@ -2073,7 +2005,17 @@ namespace MatterHackers.MatterControl
 
 		public string MainTabKey { get; internal set; }
 
-		public PartPreviewContent AppView { get; internal set; }
+		public static List<StartupAction> StartupActions { get; } = new List<StartupAction>();
+
+		public static List<StartupTask> StartupTasks { get; } = new List<StartupTask>();
+		public static Type ServicesStatusType { get; set; }
+
+		public bool PrinterTabSelected { get; set; } = false;
+
+		/// <summary>
+		/// Indicates if any ActivePrinter is running a print task, either in paused or printing states
+		/// </summary>
+		public bool AnyPrintTaskRunning => this.ActivePrinters.Any(p => p.Connection.PrinterIsPrinting || p.Connection.PrinterIsPaused);
 
 		public event EventHandler<WidgetSourceEventArgs> AddPrintersTabRightElement;
 
@@ -2087,12 +2029,12 @@ namespace MatterHackers.MatterControl
 		public async Task PrintPart(EditContext editContext, PrinterConfig printer, IProgress<ProgressStatus> reporter, CancellationToken cancellationToken, bool overrideAllowGCode = false)
 		{
 			var partFilePath = editContext.SourceFilePath;
-			var gcodeFilePath = editContext.GCodeFilePath;
+			var gcodeFilePath = editContext.GCodeFilePath(printer);
 			var printItemName = editContext.SourceItem.Name;
 
 			// Exit if called in a non-applicable state
-			if (this.ActivePrinter.Connection.CommunicationState != CommunicationStates.Connected
-				&& this.ActivePrinter.Connection.CommunicationState != CommunicationStates.FinishedPrint)
+			if (printer.Connection.CommunicationState != CommunicationStates.Connected
+				&& printer.Connection.CommunicationState != CommunicationStates.FinishedPrint)
 			{
 				return;
 			}
@@ -2106,9 +2048,9 @@ namespace MatterHackers.MatterControl
 					return;
 				}
 
-				this.PrintingItemName = printItemName;
+				printer.Connection.PrintingItemName = printItemName;
 
-				if (printer.Settings.IsValid())
+				if (SettingsValidation.SettingsValid(printer))
 				{
 					// check that current bed temp is is within 10 degrees of leveling temp
 					var enabled = printer.Settings.GetValue<bool>(SettingsKey.print_leveling_enabled);
@@ -2140,7 +2082,7 @@ If you experience adhesion problems, please re-run leveling."
 					}
 
 					// clear the output cache prior to starting a print
-					this.ActivePrinter.Connection.TerminalLog.Clear();
+					printer.Connection.TerminalLog.Clear();
 
 					string hideGCodeWarning = ApplicationSettings.Instance.get(ApplicationSettingsKey.HideGCodeWarning);
 
@@ -2150,7 +2092,7 @@ If you experience adhesion problems, please re-run leveling."
 					{
 						var hideGCodeWarningCheckBox = new CheckBox(doNotAskAgainMessage)
 						{
-							TextColor = ActiveTheme.Instance.PrimaryTextColor,
+							TextColor = this.Theme.TextColor,
 							Margin = new BorderDouble(top: 6, left: 6),
 							HAnchor = Agg.UI.HAnchor.Left
 						};
@@ -2173,7 +2115,7 @@ If you experience adhesion problems, please re-run leveling."
 								{
 									if (messageBoxResponse)
 									{
-										this.ActivePrinter.Connection.CommunicationState = CommunicationStates.PreparingToPrint;
+										printer.Connection.CommunicationState = CommunicationStates.PreparingToPrint;
 										this.ArchiveAndStartPrint(partFilePath, gcodeFilePath, printer);
 									}
 								},
@@ -2189,7 +2131,7 @@ If you experience adhesion problems, please re-run leveling."
 					}
 					else
 					{
-						this.ActivePrinter.Connection.CommunicationState = CommunicationStates.PreparingToPrint;
+						printer.Connection.CommunicationState = CommunicationStates.PreparingToPrint;
 
 						(bool slicingSucceeded, string finalPath) = await this.SliceItemLoadOutput(
 							printer,
@@ -2204,7 +2146,7 @@ If you experience adhesion problems, please re-run leveling."
 						else
 						{
 							// TODO: Need to reset printing state? This seems like I shouldn't own this indicator
-							this.ActivePrinter.Connection.CommunicationState = CommunicationStates.Connected;
+							printer.Connection.CommunicationState = CommunicationStates.Connected;
 						}
 					}
 				}
@@ -2296,7 +2238,7 @@ If you experience adhesion problems, please re-run leveling."
 					ResumeToolTip = "Resume Print".Localize(),
 					StopAction = () => UiThread.RunOnIdle(() =>
 					{
-						this.ConditionallyCancelPrint();
+						printer.CancelPrint();
 					}),
 					StopToolTip = "Cancel Print".Localize(),
 				});
@@ -2336,7 +2278,7 @@ If you experience adhesion problems, please re-run leveling."
 
 					if (originalIsGCode)
 					{
-						await this.ActivePrinter.Connection.StartPrint(gcodeFilePath);
+						await printer.Connection.StartPrint(gcodeFilePath);
 
 						MonitorPrintTask(printer);
 
@@ -2356,7 +2298,7 @@ If you experience adhesion problems, please re-run leveling."
 							string fileEnd = System.Text.Encoding.UTF8.GetString(buffer);
 							if (fileEnd.Contains("filament used"))
 							{
-								await this.ActivePrinter.Connection.StartPrint(gcodeFilePath);
+								await printer.Connection.StartPrint(gcodeFilePath);
 								MonitorPrintTask(printer);
 								return;
 							}
@@ -2364,7 +2306,7 @@ If you experience adhesion problems, please re-run leveling."
 					}
 				}
 
-				this.ActivePrinter.Connection.CommunicationState = CommunicationStates.Connected;
+				printer.Connection.CommunicationState = CommunicationStates.Connected;
 			}
 		}
 
@@ -2456,6 +2398,12 @@ If you experience adhesion problems, please re-run leveling."
 							StyledMessageBox.ShowMessageBox(message, "Warning, very short print".Localize());
 						});
 					}
+				}
+
+				// Switch to the 3D layer view if on Model view and slicing succeeded
+				if (printer.ViewState.ViewMode == PartViewMode.Model)
+				{
+					printer.ViewState.ViewMode = PartViewMode.Layers3D;
 				}
 
 				return Task.CompletedTask;
@@ -2553,6 +2501,20 @@ If you experience adhesion problems, please re-run leveling."
 		{
 			public bool IsAuthenticated { get; set; }
 		}
+
+		public class StartupTask
+		{
+			public string Title { get; set; }
+			public int Priority { get; set; }
+			public Func<IProgress<ProgressStatus>, CancellationToken, Task> Action { get; set; }
+		}
+
+		public class StartupAction
+		{
+			public string Title { get; set; }
+			public int Priority { get; set; }
+			public Action Action { get; set; }
+		}
 	}
 
 	public class WidgetSourceEventArgs : EventArgs
@@ -2568,7 +2530,6 @@ If you experience adhesion problems, please re-run leveling."
 	public class DragDropData
 	{
 		public View3DWidget View3DWidget { get; set; }
-		public PrinterConfig Printer { get; internal set; }
 		public BedConfig SceneContext { get; set; }
 	}
 
@@ -2729,7 +2690,7 @@ If you experience adhesion problems, please re-run leveling."
 
 			var overlay = new GuiWidget()
 			{
-				BackgroundColor = AppContext.Theme.ActiveTabColor,
+				BackgroundColor = AppContext.Theme.BackgroundColor,
 			};
 			overlay.AnchorAll();
 
@@ -2752,7 +2713,7 @@ If you experience adhesion problems, please re-run leveling."
 			};
 			overlay.AddChild(progressPanel);
 
-			progressPanel.AddChild(statusText = new TextWidget("", textColor: AppContext.Theme.Colors.PrimaryTextColor)
+			progressPanel.AddChild(statusText = new TextWidget("", textColor: AppContext.Theme.TextColor)
 			{
 				MinimumSize = new Vector2(200, 30),
 				HAnchor = HAnchor.Center,
@@ -2897,7 +2858,7 @@ If you experience adhesion problems, please re-run leveling."
 						case Keys.V:
 							if (keyEvent.Control)
 							{
-								view3D.Scene.Paste();
+								view3D.sceneContext.Paste();
 								keyEvent.Handled = true;
 							}
 							break;
@@ -2941,7 +2902,7 @@ If you experience adhesion problems, please re-run leveling."
 						case Keys.Insert:
 							if(keyEvent.Shift)
 							{
-								view3D.Scene.Paste();
+								view3D.sceneContext.Paste();
 								keyEvent.Handled = true;
 							}
 							break;
@@ -3128,32 +3089,86 @@ If you experience adhesion problems, please re-run leveling."
 			await ProfileManager.Instance.Initialize();
 
 			reporter?.Invoke(0.25, (loading != null) ? loading : "Initialize printer");
-			var printer = await ProfileManager.Instance.LoadPrinter();
+
+			var printer = PrinterConfig.EmptyPrinter;
 
 			// Restore bed
 			if (printer.Settings.PrinterSelected)
 			{
 				printer.ViewState.ViewMode = PartViewMode.Model;
-				UiThread.RunOnIdle(() =>
+
+				ApplicationController.StartupTasks.Add(new ApplicationController.StartupTask()
 				{
-					printer.Bed.LoadPlateFromHistory().ConfigureAwait(false);
-				}, 2);
+					Title = "Loading Bed".Localize(),
+					Priority = 100,
+					Action = (progress, cancellationToken) =>
+					{
+						return printer.Bed.LoadPlateFromHistory();
+					}
+				});
 			}
 
-			reporter?.Invoke(0.3, (loading != null) ? loading : "MainView");
-			applicationController.MainView = new PartPreviewContent(applicationController.Theme);
-
-			// now that we are all set up lets load our plugins and allow them their chance to set things up
-			reporter?.Invoke(0.8, (loading != null) ? loading : "Plugins");
+			reporter?.Invoke(0.3, (loading != null) ? loading : "Plugins");
 			AppContext.Platform.FindAndInstantiatePlugins(systemWindow);
+
+			reporter?.Invoke(0.4, (loading != null) ? loading : "MainView");
+			applicationController.MainView = new MainViewWidget(applicationController.Theme);
 
 			reporter?.Invoke(0.91, (loading != null) ? loading : "OnLoadActions");
 			applicationController.OnLoadActions();
 
-			UiThread.SetInterval(() =>
+			// Wired up to MainView.Load with the intent to fire startup actions and tasks in order with reporting
+			async void initialWindowLoad(object s, EventArgs e)
 			{
-				applicationController.ActivePrinter.Connection.OnIdle();
-			}, .1);
+				try
+				{
+					// Batch startup actions
+					await applicationController.Tasks.Execute(
+						"Finishing Startup".Localize(),
+						(progress, cancellationToken) =>
+						{
+							var status = new ProgressStatus();
+
+							int itemCount = ApplicationController.StartupActions.Count;
+
+							double i = 1;
+
+							foreach (var action in ApplicationController.StartupActions.OrderByDescending(t => t.Priority))
+							{
+								status.Status = action.Title;
+								progress.Report(status);
+
+								action.Action?.Invoke();
+								status.Progress0To1 = i++ / itemCount;
+								progress.Report(status);
+							}
+
+							return Task.CompletedTask;
+						});
+
+					await applicationController.Tasks.Execute(
+						"Restoring Printers".Localize(),
+						async (progress, cancellationToken) =>
+						{
+							await applicationController.OpenAllPrinters();
+						});
+
+					// Batch startup tasks
+					foreach (var task in ApplicationController.StartupTasks.OrderByDescending(t => t.Priority))
+					{
+						await applicationController.Tasks.Execute(task.Title, task.Action);
+					}
+				}
+				catch
+				{
+				}
+
+				// Unhook after execution
+				applicationController.MainView.Load -= initialWindowLoad;
+			}
+
+			// Hook after first draw
+			applicationController.MainView.Load += initialWindowLoad;
 
 			return applicationController.MainView;
 		}
@@ -3179,5 +3194,4 @@ If you experience adhesion problems, please re-run leveling."
 		public string Name { get; set; }
 		public BedConfig SceneContext { get; set; }
 	}
-
 }

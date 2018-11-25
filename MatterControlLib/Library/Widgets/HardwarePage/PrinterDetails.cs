@@ -28,9 +28,7 @@ either expressed or implied, of the FreeBSD Project.
 */
 
 
-#if !__ANDROID__
 using Markdig.Agg;
-#endif
 using MatterHackers.Agg;
 using MatterHackers.Agg.Image;
 using MatterHackers.Agg.UI;
@@ -45,6 +43,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace MatterHackers.MatterControl.Library.Widgets.HardwarePage
@@ -73,7 +72,7 @@ namespace MatterHackers.MatterControl.Library.Widgets.HardwarePage
 			};
 			openButton.Click += (s, e) =>
 			{
-				PrinterDetails.SwitchPrinters(printerInfo.ID);
+				ApplicationController.Instance.OpenPrinter(printerInfo.ID).ConfigureAwait(false);
 			};
 			headingRow.AddChild(openButton);
 
@@ -124,7 +123,6 @@ namespace MatterHackers.MatterControl.Library.Widgets.HardwarePage
 						Padding = theme.DefaultContainerPadding
 					};
 
-#if !__ANDROID__
 					var description = new MarkdownWidget(theme)
 					{
 						MinimumSize = new VectorMath.Vector2(350, 0),
@@ -133,7 +131,6 @@ namespace MatterHackers.MatterControl.Library.Widgets.HardwarePage
 						Markdown = product.ProductDescription.Trim()
 					};
 					descriptionBackground.AddChild(description);
-#endif
 					descriptionBackground.BeforeDraw += (s, e) =>
 					{
 						var rect = new RoundedRect(descriptionBackground.LocalBounds, 3);
@@ -235,41 +232,6 @@ namespace MatterHackers.MatterControl.Library.Widgets.HardwarePage
 			return null;
 		}
 
-		public static void SwitchPrinters(string printerID)
-		{
-			var activePrinter = ApplicationController.Instance.ActivePrinter;
-
-			if (printerID == "new"
-				|| string.IsNullOrEmpty(printerID)
-				|| printerID == activePrinter.Settings.ID)
-			{
-				// do nothing
-			}
-			else
-			{
-				// TODO: when this opens a new tab we will not need to check any printer
-				if (activePrinter.Connection.PrinterIsPrinting
-					|| activePrinter.Connection.PrinterIsPaused)
-				{
-					// TODO: Rather than block here, the UI elements driving the change should be disabled while printing/paused
-					UiThread.RunOnIdle(() =>
-						StyledMessageBox.ShowMessageBox("Please wait until the print has finished and try again.".Localize(), "Can't switch printers while printing".Localize())
-					);
-				}
-				else
-				{
-					ProfileManager.Instance.LastProfileID = printerID;
-					ProfileManager.Instance.LoadPrinter().ContinueWith(task =>
-					{
-						var printer = task.Result;
-
-						// TODO: Alternatively we could hold and restore the Scene from the prior printer
-						printer.Bed.LoadPlateFromHistory().ConfigureAwait(false);
-					});
-				}
-			}
-		}
-
 		private GuiWidget AddHeading(ImageBuffer icon, string text)
 		{
 			var row = new FlowLayoutWidget()
@@ -286,7 +248,7 @@ namespace MatterHackers.MatterControl.Library.Widgets.HardwarePage
 			row.AddChild(
 				new TextWidget(
 					text,
-					textColor: theme.Colors.PrimaryTextColor,
+					textColor: theme.TextColor,
 					pointSize: theme.DefaultFontSize)
 					{
 						VAnchor = VAnchor.Center
@@ -305,7 +267,7 @@ namespace MatterHackers.MatterControl.Library.Widgets.HardwarePage
 			row.AddChild(
 				new TextWidget(
 					text,
-					textColor: theme.Colors.PrimaryTextColor,
+					textColor: theme.TextColor,
 					pointSize: theme.DefaultFontSize));
 
 			return row;

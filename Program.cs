@@ -75,6 +75,7 @@ namespace MatterHackers.MatterControl
 			config.Bind("Agg:GraphicsMode", AggContext.Config.GraphicsMode);
 
 			Slicer.RunInProcess = config.GetValue<bool>("MatterControl:Slicer:Debug");
+			Slicer.RunInProcess = true;
 
 			// Make sure we have the right working directory as we assume everything relative to the executable.
 			Directory.SetCurrentDirectory(Path.GetDirectoryName(System.Reflection.Assembly.GetEntryAssembly().Location));
@@ -86,6 +87,8 @@ namespace MatterHackers.MatterControl
 
 			MatterHackers.MatterControl.AppContext.Platform = AggContext.CreateInstanceFrom<INativePlatformFeatures>(platformFeaturesProvider);
 			MatterHackers.MatterControl.AppContext.Platform.ProcessCommandline();
+
+			config.Bind("MatterControl", MatterHackers.MatterControl.AppContext.Options);
 
 			// Get startup bounds from MatterControl and construct system window
 			//var systemWindow = new DesktopMainWindow(400, 200)

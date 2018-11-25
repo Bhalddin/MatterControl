@@ -33,28 +33,25 @@ using MatterHackers.Agg;
 using MatterHackers.Agg.UI;
 using MatterHackers.Localizations;
 using MatterHackers.MatterControl.CustomWidgets;
-using MatterHackers.MatterControl.PrinterCommunication;
-using MatterHackers.MatterControl.SlicerConfiguration;
 
 namespace MatterHackers.MatterControl.PrinterControls
 {
 	public class FanControls : FlowLayoutWidget
 	{
-		private EventHandler unregisterEvents;
-
 		private EditableNumberDisplay fanSpeedDisplay;
 
-		private ICheckbox toggleSwitch;
+		private RoundedToggleSwitch toggleSwitch;
+		private PrinterConfig printer;
 
-		private FanControls(PrinterConnection printerConnection, ThemeConfig theme)
+		private FanControls(PrinterConfig printer, ThemeConfig theme)
 			: base(FlowDirection.TopToBottom)
 		{
 			this.HAnchor = HAnchor.Stretch;
 			this.HAnchor = HAnchor.Stretch;
-
+			this.printer = printer;
 
 			//Matt's test editing to add a on/off toggle switch
-			bool fanActive = printerConnection.FanSpeed0To255 != 0;
+			bool fanActive = printer.Connection.FanSpeed0To255 != 0;
 
 			Stopwatch timeSinceLastManualSend = new Stopwatch();
 
@@ -73,7 +70,7 @@ namespace MatterHackers.MatterControl.PrinterControls
 			fanSpeedDisplay = new EditableNumberDisplay(0, "100", theme)
 			{
 				DisplayFormat = "{0:0}",
-				Value = printerConnection.FanSpeed0To255 * 100 / 255
+				Value = printer.Connection.FanSpeed0To255 * 100 / 255
 			};
 			fanSpeedDisplay.ValueChanged += (sender, e) =>
 			{
@@ -82,7 +79,7 @@ namespace MatterHackers.MatterControl.PrinterControls
 					|| timeSinceLastManualSend.ElapsedMilliseconds > 500)
 				{
 					timeSinceLastManualSend.Restart();
-					printerConnection.FanSpeed0To255 = (int)(fanSpeedDisplay.Value * 255 / 100 + .5);
+					printer.Connection.FanSpeed0To255 = (int)(fanSpeedDisplay.Value * 255 / 100 + .5);
 				}
 			};
 			container.AddChild(fanSpeedDisplay);
@@ -90,12 +87,12 @@ namespace MatterHackers.MatterControl.PrinterControls
 			container.Selectable = true;
 
 			// put in %
-			container.AddChild(new TextWidget("%", pointSize: 10, textColor: ActiveTheme.Instance.PrimaryTextColor)
+			container.AddChild(new TextWidget("%", pointSize: 10, textColor: theme.TextColor)
 			{
 				VAnchor = VAnchor.Center
 			});
 
-			var toggleSwitch = new RoundedToggleSwitch(theme)
+			toggleSwitch = new RoundedToggleSwitch(theme)
 			{
 				Margin = new BorderDouble(5, 0),
 				VAnchor = VAnchor.Center
@@ -108,46 +105,46 @@ namespace MatterHackers.MatterControl.PrinterControls
 					timeSinceLastManualSend.Restart();
 					if (toggleSwitch.Checked)
 					{
-						printerConnection.FanSpeed0To255 = 255;
+						printer.Connection.FanSpeed0To255 = 255;
 					}
 					else
 					{
-						printerConnection.FanSpeed0To255 = 0;
+						printer.Connection.FanSpeed0To255 = 0;
 					}
 				}
 			};
 			container.AddChild(toggleSwitch);
 			settingsRow.ActionWidget = toggleSwitch;
 
-			// CreateFanControls
-			printerConnection.FanSpeedSet.RegisterEvent((s, e) =>
-			{
-				if ((int)printerConnection.FanSpeed0To255 > 0)
-				{
-					toggleSwitch.Checked = true;
-				}
-				else
-				{
-					toggleSwitch.Checked = false;
-				}
-
-				fanSpeedDisplay.Value = printerConnection.FanSpeed0To255 * 100 / 255;
-			}
-			, ref unregisterEvents);
+			// Register listeners
+			printer.Connection.FanSpeedSet += Connection_FanSpeedSet;
 		}
 
 		public static SectionWidget CreateSection(PrinterConfig printer, ThemeConfig theme)
 		{
-			return new SectionWidget(
-				"Fan".Localize(),
-				new FanControls(printer.Connection, theme),
-				theme);
+			return new SectionWidget("Fan".Localize(), new FanControls(printer, theme), theme);
 		}
 
 		public override void OnClosed(EventArgs e)
 		{
-			unregisterEvents?.Invoke(this, null);
+			// Unregister listeners
+			printer.Connection.FanSpeedSet -= Connection_FanSpeedSet;
+
 			base.OnClosed(e);
+		}
+
+		private void Connection_FanSpeedSet(object s, EventArgs e)
+		{
+			if ((int)printer.Connection.FanSpeed0To255 > 0)
+			{
+				toggleSwitch.Checked = true;
+			}
+			else
+			{
+				toggleSwitch.Checked = false;
+			}
+
+			fanSpeedDisplay.Value = printer.Connection.FanSpeed0To255 * 100 / 255;
 		}
 	}
 }

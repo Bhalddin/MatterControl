@@ -44,7 +44,6 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 		private GuiWidget finishSetupButton;
 		private GuiWidget startPrintButton;
 
-		private EventHandler unregisterEvents;
 		private PrinterConfig printer;
 		private ThemeConfig theme;
 
@@ -79,38 +78,28 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 				Margin = theme.ButtonSpacing
 			});
 
-			printer.Connection.CommunicationStateChanged.RegisterEvent((s, e) =>
-			{
-				UiThread.RunOnIdle(SetButtonStates);
-			}, ref unregisterEvents);
-
-			PrinterSettings.SettingChanged.RegisterEvent((s, e) =>
-			{
-				if (e is StringEventArgs stringEvent
-					&& (stringEvent.Data == SettingsKey.z_probe_z_offset
-						|| stringEvent.Data == SettingsKey.print_leveling_data
-						|| stringEvent.Data == SettingsKey.print_leveling_solution
-						|| stringEvent.Data == SettingsKey.bed_temperature
-						|| stringEvent.Data == SettingsKey.print_leveling_enabled
-						|| stringEvent.Data == SettingsKey.print_leveling_required_to_print))
-				{
-					SetButtonStates();
-				}
-			}, ref unregisterEvents);
+			// Register listeners
+			printer.Connection.CommunicationStateChanged += Connection_CommunicationStateChanged;
+			printer.Settings.SettingChanged += Printer_SettingChanged;
 
 			SetButtonStates();
 		}
 
 		public override void OnClosed(EventArgs e)
 		{
-			unregisterEvents?.Invoke(this, null);
+			// Unregister listeners
+			printer.Connection.CommunicationStateChanged -= Connection_CommunicationStateChanged;
+			printer.Settings.SettingChanged -= Printer_SettingChanged;
+
 			base.OnClosed(e);
 		}
 
 		protected void SetButtonStates()
 		{
 			// If we don't have leveling data and we need it
-			bool showSetupButton = PrintLevelingData.NeedsToBeRun(printer) || ProbeCalibrationWizard.NeedsToBeRun(printer);
+			bool showSetupButton = LevelingValidation.NeedsToBeRun(printer)
+				|| ProbeCalibrationWizard.NeedsToBeRun(printer)
+				|| LoadFilamentWizard.NeedsToBeRun(printer);
 
 			switch (printer.Connection.CommunicationState)
 			{
@@ -151,6 +140,26 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 						theme.RemovePrimaryActionStyle(startPrintButton);
 					}
 					break;
+			}
+		}
+
+		private void Connection_CommunicationStateChanged(object s, EventArgs e)
+		{
+			UiThread.RunOnIdle(SetButtonStates);
+		}
+
+		private void Printer_SettingChanged(object s, EventArgs e)
+		{
+			if (e is StringEventArgs stringEvent
+				&& (stringEvent.Data == SettingsKey.z_probe_z_offset
+					|| stringEvent.Data == SettingsKey.print_leveling_data
+					|| stringEvent.Data == SettingsKey.print_leveling_solution
+					|| stringEvent.Data == SettingsKey.bed_temperature
+					|| stringEvent.Data == SettingsKey.print_leveling_enabled
+					|| stringEvent.Data == SettingsKey.print_leveling_required_to_print
+					|| stringEvent.Data == SettingsKey.filament_has_been_loaded))
+			{
+				SetButtonStates();
 			}
 		}
 	}

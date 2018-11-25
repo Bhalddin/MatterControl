@@ -42,13 +42,13 @@ using MatterHackers.MatterControl.PrinterCommunication;
 using MatterHackers.MatterControl.PrintHistory;
 using MatterHackers.MatterControl.SetupWizard;
 using MatterHackers.MatterControl.SlicerConfiguration;
+using Newtonsoft.Json;
 
 namespace MatterHackers.MatterControl.PartPreviewWindow
 {
 	public class PrinterActionsBar : OverflowBar
 	{
 		private PrinterConfig printer;
-		private EventHandler unregisterEvents;
 		private static MarlinEEPromPage marlinEEPromPage = null;
 		private static RepetierEEPromPage repetierEEPromPage = null;
 
@@ -59,6 +59,8 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 		private RadioIconButton layers2DButton;
 		internal RadioIconButton layers3DButton;
 		internal RadioIconButton modelViewButton;
+
+		private Dictionary<PartViewMode, RadioIconButton> viewModes = new Dictionary<PartViewMode, RadioIconButton>();
 
 		public PrinterActionsBar(PrinterConfig printer, PrinterTabPage printerTabPage, ThemeConfig theme)
 			: base(theme)
@@ -120,6 +122,8 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 			buttonGroupB.Add(modelViewButton);
 			AddChild(modelViewButton);
 
+			viewModes.Add(PartViewMode.Model, modelViewButton);
+
 			iconPath = Path.Combine("ViewTransformControls", "gcode_3d.png");
 			layers3DButton = new RadioIconButton(AggContext.StaticData.LoadIcon(iconPath, 16, 16, theme.InvertIcons), theme)
 			{
@@ -131,6 +135,8 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 			};
 			layers3DButton.Click += SwitchModes_Click;
 			buttonGroupB.Add(layers3DButton);
+
+			viewModes.Add(PartViewMode.Layers3D, layers3DButton);
 
 			if (!UserSettings.Instance.IsTouchScreen)
 			{
@@ -149,6 +155,8 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 			layers2DButton.Click += SwitchModes_Click;
 			buttonGroupB.Add(layers2DButton);
 			this.AddChild(layers2DButton);
+
+			viewModes.Add(PartViewMode.Layers2D, layers2DButton);
 
 			this.AddChild(new HorizontalSpacer());
 
@@ -179,38 +187,24 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 
 			printer.ViewState.ViewModeChanged += (s, e) =>
 			{
-				RadioIconButton activeButton = null;
-				if (e.ViewMode == PartViewMode.Layers2D)
+				if (viewModes[e.ViewMode] is RadioIconButton activeButton
+					&& viewModes[e.PreviousMode] is RadioIconButton previousButton
+					&& !buttonIsBeingClicked)
 				{
-					activeButton = layers2DButton;
-				}
-				else if (e.ViewMode == PartViewMode.Layers3D)
-				{
-					activeButton = layers3DButton;
-				}
-				else
-				{
-					activeButton = modelViewButton;
-				}
-
-				if(activeButton != null)
-				{
-					activeButton.Checked = true;
-
-					if (!buttonIsBeingClicked)
-					{
-						activeButton.FlashBackground(theme.PrimaryAccentColor.WithContrast(theme.Colors.PrimaryTextColor, 6).ToColor());
-					}
+					// Show slide to animation from previous to current, on completion update view to current by setting active.Checked
+					previousButton.SlideToNewState(
+						activeButton,
+						this,
+						() =>
+						{
+							activeButton.Checked = true;
+						},
+						theme);
 				}
 			};
 
-			printer.Connection.ConnectionSucceeded.RegisterEvent((s, e) =>
-			{
-				UiThread.RunOnIdle(() =>
-				{
-					PrintRecovery.CheckIfNeedToRecoverPrint(printer);
-				});
-			}, ref unregisterEvents);
+			// Register listeners
+			printer.Connection.ConnectionSucceeded += ConnectionSucceeded;
 		}
 
 		bool buttonIsBeingClicked;
@@ -245,8 +239,18 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 
 		public override void OnClosed(EventArgs e)
 		{
-			unregisterEvents?.Invoke(this, null);
+			// Unregister listeners
+			printer.Connection.ConnectionSucceeded -= ConnectionSucceeded;
+
 			base.OnClosed(e);
+		}
+
+		private void ConnectionSucceeded(object s, EventArgs e)
+		{
+			UiThread.RunOnIdle(() =>
+			{
+				PrintRecovery.CheckIfNeedToRecoverPrint(printer);
+			});
 		}
 
 		private void GeneratePrinterOverflowMenu(PopupMenu popupMenu, ThemeConfig theme)
@@ -303,7 +307,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 					Title = "Export All Settings".Localize(),
 					Action = () =>
 					{
-						printer.Settings.Helpers.ExportAsMatterControlConfig();
+						ApplicationController.Instance.ExportAsMatterControlConfig(printer);
 					}
 				},
 				new ActionSeparator(),
@@ -312,7 +316,8 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 					Title = "Restore Settings".Localize(),
 					Action = () =>
 					{
-						DialogWindow.Show<PrinterProfileHistoryPage>();
+
+						DialogWindow.Show(new PrinterProfileHistoryPage(printer));
 					}
 				},
 				new NamedAction()
@@ -361,7 +366,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 							{
 								if (doDelete)
 								{
-									ProfileManager.Instance.DeleteActivePrinter(true);
+									ProfileManager.Instance.DeletePrinter(printer.Settings.ID);
 								}
 							},
 							"Are you sure you want to delete your currently selected printer?".Localize(),
@@ -432,39 +437,6 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 						break;
 				}
 			});
-		}
-	}
-
-	public static class WidgetAnimationExtensions
-	{
-		public static void FlashBackground(this GuiWidget widget, Color hightlightColor)
-		{
-			double displayTime = 2;
-			double pulseTime = .5;
-			double totalSeconds = 0;
-			Color backgroundColor = widget.BackgroundColor;
-			// Show a highlight on the button as the user did not click it
-			Animation flashBackground = null;
-			flashBackground = new Animation()
-			{
-				DrawTarget = widget,
-				FramesPerSecond = 10,
-				Update = (s1, updateEvent) =>
-				{
-					totalSeconds += updateEvent.SecondsPassed;
-					if (totalSeconds < displayTime)
-					{
-						double blend = AttentionGetter.GetFadeInOutPulseRatio(totalSeconds, pulseTime);
-						widget.BackgroundColor = new Color(hightlightColor, (int)(blend * 255));
-					}
-					else
-					{
-						widget.BackgroundColor = backgroundColor;
-						flashBackground.Stop();
-					}
-				}
-			};
-			flashBackground.Start();
 		}
 	}
 }

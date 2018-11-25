@@ -39,8 +39,6 @@ namespace MatterHackers.MatterControl
 {
 	public class AndroidConnectDevicePage : DialogPage
 	{
-		private EventHandler unregisterEvents;
-
 		private TextWidget generalError;
 
 		private GuiWidget connectButton;
@@ -53,24 +51,25 @@ namespace MatterHackers.MatterControl
 
 		private FlowLayoutWidget retryButtonContainer;
 		private FlowLayoutWidget connectButtonContainer;
+		private PrinterConfig printer;
 
-		public AndroidConnectDevicePage()
+		public AndroidConnectDevicePage(PrinterConfig printer)
 		{
+			this.printer = printer;
+
 			var printerNameLabel = new TextWidget("Connect Your Device".Localize() + ":", 0, 0, labelFontSize)
 			{
-				TextColor = ActiveTheme.Instance.PrimaryTextColor,
+				TextColor = theme.TextColor,
 				Margin = new BorderDouble(bottom: 10)
 			};
 			contentRow.AddChild(printerNameLabel);
 
-			contentRow.AddChild(new TextWidget("Instructions".Localize() + ":", 0, 0, 12,textColor:ActiveTheme.Instance.PrimaryTextColor));
-			contentRow.AddChild(new TextWidget("1. Power on your 3D Printer.".Localize(), 0, 0, 12,textColor:ActiveTheme.Instance.PrimaryTextColor));
-			contentRow.AddChild(new TextWidget("2. Attach your 3D Printer via USB.".Localize(), 0, 0, 12,textColor:ActiveTheme.Instance.PrimaryTextColor));
-			contentRow.AddChild(new TextWidget("3. Press 'Connect'.".Localize(), 0, 0, 12,textColor:ActiveTheme.Instance.PrimaryTextColor));
+			contentRow.AddChild(new TextWidget("Instructions".Localize() + ":", 0, 0, 12,textColor:theme.TextColor));
+			contentRow.AddChild(new TextWidget("1. Power on your 3D Printer.".Localize(), 0, 0, 12,textColor:theme.TextColor));
+			contentRow.AddChild(new TextWidget("2. Attach your 3D Printer via USB.".Localize(), 0, 0, 12,textColor:theme.TextColor));
+			contentRow.AddChild(new TextWidget("3. Press 'Connect'.".Localize(), 0, 0, 12,textColor:theme.TextColor));
 
 			//Add inputs to main container
-			ApplicationController.Instance.ActivePrinter.Connection.CommunicationStateChanged.RegisterEvent(communicationStateChanged, ref unregisterEvents);
-
 			connectButtonContainer = new FlowLayoutWidget()
 			{
 				HAnchor = HAnchor.Stretch,
@@ -89,7 +88,7 @@ namespace MatterHackers.MatterControl
 			connectButtonContainer.AddChild(new HorizontalSpacer());
 			contentRow.AddChild(connectButtonContainer);
 
-			skipMessage = new TextWidget("(Press 'Skip' to setup connection later)".Localize(), 0, 0, 10, textColor: ActiveTheme.Instance.PrimaryTextColor);
+			skipMessage = new TextWidget("(Press 'Skip' to setup connection later)".Localize(), 0, 0, 10, textColor: theme.TextColor);
 			contentRow.AddChild(skipMessage);
 
 			generalError = new TextWidget("", 0, 0, errorFontSize)
@@ -111,7 +110,7 @@ namespace MatterHackers.MatterControl
 			troubleshootButton.Click += (s, e) => UiThread.RunOnIdle(() =>
 			{
 				DialogWindow.ChangeToPage(
-					new SetupWizardTroubleshooting(ApplicationController.Instance.ActivePrinter));
+					new SetupWizardTroubleshooting(printer));
 			});
 
 			retryButtonContainer = new FlowLayoutWidget()
@@ -137,12 +136,15 @@ namespace MatterHackers.MatterControl
 
 			this.AddPageAction(nextButton);
 
+			// Register listeners
+			printer.Connection.CommunicationStateChanged += Connection_CommunicationStateChanged;
+
 			updateControls(true);
 		}
 
 		void ConnectButton_Click(object sender, EventArgs mouseEvent)
 		{
-			ApplicationController.Instance.ActivePrinter.Connection.Connect();
+			printer.Connection.Connect();
 		}
 
 		void NextButton_Click(object sender, EventArgs mouseEvent)
@@ -153,7 +155,7 @@ namespace MatterHackers.MatterControl
 			UiThread.RunOnIdle(this.DialogWindow.Close);
 		}
 
-		private void communicationStateChanged(object sender, EventArgs args)
+		private void Connection_CommunicationStateChanged(object sender, EventArgs args)
 		{
 			UiThread.RunOnIdle(() => updateControls(false));
 		}
@@ -168,19 +170,19 @@ namespace MatterHackers.MatterControl
 			connectButtonContainer.Visible = false;
 			retryButtonContainer.Visible = false;
 
-			if (ApplicationController.Instance.ActivePrinter.Connection.IsConnected)
+			if (printer.Connection.IsConnected)
 			{
 				generalError.Text = "{0}!".FormatWith ("Connection succeeded".Localize ());
 				generalError.Visible = true;
 				nextButton.Visible = true;
 			}
-			else if (firstLoad || ApplicationController.Instance.ActivePrinter.Connection.CommunicationState == CommunicationStates.Disconnected)
+			else if (firstLoad || printer.Connection.CommunicationState == CommunicationStates.Disconnected)
 			{
 				generalError.Text = "";
 				connectButton.Visible = true;
 				connectButtonContainer.Visible = true;
 			}
-			else if (ApplicationController.Instance.ActivePrinter.Connection.CommunicationState == CommunicationStates.AttemptingToConnect)
+			else if (printer.Connection.CommunicationState == CommunicationStates.AttemptingToConnect)
 			{
 				generalError.Text = "{0}...".FormatWith("Attempting to connect".Localize());
 				generalError.Visible = true;
@@ -197,7 +199,9 @@ namespace MatterHackers.MatterControl
 
 		public override void OnClosed(EventArgs e)
 		{
-			unregisterEvents?.Invoke(this, null);
+			// Unregister listeners
+			printer.Connection.CommunicationStateChanged -= Connection_CommunicationStateChanged;
+
 			base.OnClosed(e);
 		}
 	}

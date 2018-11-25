@@ -44,6 +44,8 @@ namespace MatterHackers.MatterControl.CustomWidgets
 {
 	public class LibraryListView : ScrollableWidget
 	{
+		public enum DoubleClickActions { PreviewItem, AddToBed }
+
 		public event EventHandler ContentReloaded;
 
 		private ThemeConfig theme;
@@ -72,6 +74,8 @@ namespace MatterHackers.MatterControl.CustomWidgets
 		{
 			contentView = new IconListView(theme);
 
+			libraryView.Click += ContentView_Click;
+
 			loadingBackgroundColor = new Color(theme.PrimaryAccentColor, 10);
 
 			this.theme = theme;
@@ -87,6 +91,17 @@ namespace MatterHackers.MatterControl.CustomWidgets
 
 			context.ContainerChanged += ActiveContainer_Changed;
 			context.ContentChanged += ActiveContainer_ContentChanged;
+		}
+
+		private void ContentView_Click(object sender, MouseEventArgs e)
+		{
+			if (sender is GuiWidget guiWidget)
+			{
+				var screenPosition = guiWidget.TransformToScreenSpace(e.Position);
+				var thisPosition = this.TransformFromScreenSpace(screenPosition);
+				var thisMouseClick = new MouseEventArgs(e, thisPosition.X, thisPosition.Y);
+				ShowRightClickMenu(thisMouseClick);
+			}
 		}
 
 		public bool ShowItems { get; set; } = true;
@@ -422,12 +437,21 @@ namespace MatterHackers.MatterControl.CustomWidgets
 					// List items
 					if (itemModel != null)
 					{
-						var activeContext = ApplicationController.Instance.DragDropData;
-						activeContext.SceneContext?.AddToPlate(new[] { itemModel });
+						if (this.DoubleClickAction == DoubleClickActions.PreviewItem)
+						{
+							ApplicationController.Instance.OpenIntoNewTab(new[] { itemModel });
+						}
+						else
+						{
+							var activeContext = ApplicationController.Instance.DragDropData;
+							activeContext.SceneContext?.AddToPlate(new[] { itemModel });
+						}
 					}
 				}
 			});
 		}
+
+		public DoubleClickActions DoubleClickAction { get; set; } = DoubleClickActions.AddToBed;
 
 		public void SetActiveContainer(ILibraryContainer container)
 		{
@@ -452,12 +476,20 @@ namespace MatterHackers.MatterControl.CustomWidgets
 
 		public override void OnClick(MouseEventArgs mouseEvent)
 		{
+			ShowRightClickMenu(mouseEvent);
+
+			base.OnClick(mouseEvent);
+		}
+
+		private void ShowRightClickMenu(MouseEventArgs mouseEvent)
+		{
 			var bounds = this.LocalBounds;
 			var hitRegion = new RectangleDouble(
 				new Vector2(bounds.Right - 32, bounds.Top),
 				new Vector2(bounds.Right, bounds.Top - 32));
 
 			if (this.HasMenu
+				&& this.MenuActions?.Any() == true
 				&& (hitRegion.Contains(mouseEvent.Position)
 					|| mouseEvent.Button == MouseButtons.Right))
 			{
@@ -509,8 +541,6 @@ namespace MatterHackers.MatterControl.CustomWidgets
 					},
 					altBounds: popupBounds);
 			}
-
-			base.OnClick(mouseEvent);
 		}
 
 		public override void OnMouseWheel(MouseEventArgs mouseEvent)

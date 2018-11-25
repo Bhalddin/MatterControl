@@ -40,7 +40,7 @@ namespace MatterHackers.MatterControl
 			contentRow.AddChild(
 				new TextWidget(
 					"MatterControl was unable to connect to the Internet. Please check your Wifi connection and try again".Localize() + "...",
-					textColor: ActiveTheme.Instance.PrimaryTextColor));
+					textColor: theme.TextColor));
 
 			var configureButton = theme.CreateDialogButton("Configure Wifi".Localize());
 			configureButton.Margin = new BorderDouble(0, 0, 10, 0);
@@ -48,9 +48,6 @@ namespace MatterHackers.MatterControl
 			{
 				MatterControl.AppContext.Platform.ConfigureWifi();
 				UiThread.RunOnIdle(DialogWindow.Close, 1);
-
-				// We could clear the failure count allowing the user to toggle wifi, then retry sign-in
-				//ApplicationController.WebRequestSucceeded();
 			};
 
 			//Add buttons to buttonContainer

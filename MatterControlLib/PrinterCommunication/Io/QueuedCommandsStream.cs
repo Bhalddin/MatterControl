@@ -45,10 +45,12 @@ namespace MatterHackers.MatterControl.PrinterCommunication.Io
 		private List<string> commandQueue = new List<string>();
 		private object locker = new object();
 
-		public QueuedCommandsStream(GCodeStream internalStream)
-			: base(internalStream)
+		public QueuedCommandsStream(PrinterConfig printer, GCodeStream internalStream)
+			: base(printer, internalStream)
 		{
 		}
+
+		public int Count => commandQueue.Count;
 
 		public void Add(string line, bool forceTopOfQueue = false)
 		{
@@ -112,7 +114,7 @@ namespace MatterHackers.MatterControl.PrinterCommunication.Io
 					if (commandQueue.Count > 0)
 					{
 						lineToSend = commandQueue[0];
-						lineToSend = GCodeProcessing.ReplaceMacroValues(lineToSend);
+						lineToSend = printer.ReplaceMacroValues(lineToSend);
 						commandQueue.RemoveAt(0);
 					}
 				}

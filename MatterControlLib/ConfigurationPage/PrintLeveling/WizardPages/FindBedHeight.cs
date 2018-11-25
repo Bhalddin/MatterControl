@@ -39,7 +39,7 @@ using MatterHackers.VectorMath;
 
 namespace MatterHackers.MatterControl.ConfigurationPage.PrintLeveling
 {
-	public class FindBedHeight : LevelingWizardPage
+	public class FindBedHeight : PrinterSetupWizardPage
 	{
 		private Vector3 lastReportedPosition;
 		private List<ProbePosition> probePositions;
@@ -48,8 +48,9 @@ namespace MatterHackers.MatterControl.ConfigurationPage.PrintLeveling
 
 		protected JogControls.MoveButton zPlusControl;
 		protected JogControls.MoveButton zMinusControl;
+		private RunningInterval runningInterval;
 
-		public FindBedHeight(LevelingWizard context, string pageDescription, string setZHeightCoarseInstruction1, string setZHeightCoarseInstruction2, double moveDistance,
+		public FindBedHeight(PrinterSetupWizard context, string pageDescription, string setZHeightCoarseInstruction1, string setZHeightCoarseInstruction2, double moveDistance,
 			List<ProbePosition> probePositions, int probePositionsBeingEditedIndex)
 			: base(context, pageDescription, setZHeightCoarseInstruction1)
 		{
@@ -69,19 +70,17 @@ namespace MatterHackers.MatterControl.ConfigurationPage.PrintLeveling
 			zButtonsAndInfo.AddChild(new GuiWidget(15, 10));
 
 			//textFields
-			TextWidget zPosition = new TextWidget("Z: 0.0      ", pointSize: 12, textColor: ActiveTheme.Instance.PrimaryTextColor)
+			TextWidget zPosition = new TextWidget("Z: 0.0      ", pointSize: 12, textColor: theme.TextColor)
 			{
 				VAnchor = VAnchor.Center,
 				Margin = new BorderDouble(10, 0),
 			};
 
-			var runningInterval = UiThread.SetInterval(() =>
+			runningInterval = UiThread.SetInterval(() =>
 			{
 				Vector3 destinationPosition = printer.Connection.CurrentDestination;
 				zPosition.Text = "Z: {0:0.00}".FormatWith(destinationPosition.Z);
 			}, .3);
-
-			this.Closed += (s, e) => runningInterval.Continue = false;
 
 			zButtonsAndInfo.AddChild(zPosition);
 
@@ -95,7 +94,7 @@ namespace MatterHackers.MatterControl.ConfigurationPage.PrintLeveling
 		{
 			// always make sure we don't have print leveling turned on
 			PrintLevelingStream.AllowLeveling = false;
-			nextButton.ToolTipText = string.Format("[{0}]", "Right Arrow".Localize());
+			NextButton.ToolTipText = string.Format("[{0}]", "Right Arrow".Localize());
 
 			base.PageIsBecomingActive();
 		}
@@ -108,7 +107,10 @@ namespace MatterHackers.MatterControl.ConfigurationPage.PrintLeveling
 
 		public override void OnClosed(EventArgs e)
 		{
+			// Unregister listeners
+			UiThread.ClearInterval(runningInterval);
 			this.DialogWindow.KeyDown -= TopWindowKeyDown;
+
 			base.OnClosed(e);
 		}
 
@@ -118,7 +120,7 @@ namespace MatterHackers.MatterControl.ConfigurationPage.PrintLeveling
 			probePositions[probePositionsBeingEditedIndex].position = printer.Connection.LastReportedPosition;
 			base.PageIsBecomingInactive();
 
-			nextButton.ToolTipText = "";
+			NextButton.ToolTipText = "";
 		}
 
 		private FlowLayoutWidget CreateZButtons()
@@ -142,18 +144,18 @@ namespace MatterHackers.MatterControl.ConfigurationPage.PrintLeveling
 			{
 				case Keys.Up:
 					zPlusControl_Click(null, null);
-					nextButton.Enabled = true;
+					NextButton.Enabled = true;
 					break;
 
 				case Keys.Down:
 					zMinusControl_Click(null, null);
-					nextButton.Enabled = true;
+					NextButton.Enabled = true;
 					break;
 
 				case Keys.Right:
-					if (nextButton.Enabled)
+					if (NextButton.Enabled)
 					{
-						UiThread.RunOnIdle(() => nextButton.InvokeClick());
+						UiThread.RunOnIdle(() => NextButton.InvokeClick());
 					}
 					break;
 			}

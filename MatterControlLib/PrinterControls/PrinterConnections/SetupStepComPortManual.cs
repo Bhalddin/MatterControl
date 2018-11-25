@@ -61,7 +61,6 @@ namespace MatterHackers.MatterControl.PrinterControls.PrinterConnections
 		private TextWidget printerComPortHelpMessage;
 		private TextWidget printerComPortError;
 
-		private EventHandler unregisterEvents;
 		protected List<SerialPortIndexRadioButton> SerialPortButtonsList = new List<SerialPortIndexRadioButton>();
 		private PrinterConfig printer;
 
@@ -83,10 +82,10 @@ namespace MatterHackers.MatterControl.PrinterControls.PrinterConnections
 				try
 				{
 					printerComPortHelpLink.Visible = false;
-					printerComPortError.TextColor = ActiveTheme.Instance.PrimaryTextColor;
+					printerComPortError.TextColor = theme.TextColor;
 
 					printerComPortError.Text = "Attempting to connect".Localize() + "...";
-					printerComPortError.TextColor = ActiveTheme.Instance.PrimaryTextColor;
+					printerComPortError.TextColor = theme.TextColor;
 
 					printer.Settings.Helpers.SetComPort(GetSelectedSerialPort());
 					printer.Connection.Connect();
@@ -112,7 +111,8 @@ namespace MatterHackers.MatterControl.PrinterControls.PrinterConnections
 			this.AddPageAction(connectButton);
 			this.AddPageAction(refreshButton);
 
-			printer.Connection.CommunicationStateChanged.RegisterEvent(onPrinterStatusChanged, ref unregisterEvents);
+			// Register listeners
+			printer.Connection.CommunicationStateChanged += Connection_CommunicationStateChanged;
 		}
 
 		protected override void OnCancel(out bool abortCancel)
@@ -123,7 +123,9 @@ namespace MatterHackers.MatterControl.PrinterControls.PrinterConnections
 
 		public override void OnClosed(EventArgs e)
 		{
-			unregisterEvents?.Invoke(this, null);
+			// Unregister listeners
+			printer.Connection.CommunicationStateChanged -= Connection_CommunicationStateChanged;
+
 			base.OnClosed(e);
 		}
 
@@ -139,7 +141,7 @@ namespace MatterHackers.MatterControl.PrinterControls.PrinterConnections
 
 			var comPortLabel = new TextWidget("Serial Port".Localize() + ":", 0, 0, 12)
 			{
-				TextColor = ActiveTheme.Instance.PrimaryTextColor,
+				TextColor = theme.TextColor,
 				Margin = new BorderDouble(0, 0, 0, 10),
 				HAnchor = HAnchor.Stretch
 			};
@@ -155,7 +157,7 @@ namespace MatterHackers.MatterControl.PrinterControls.PrinterConnections
 
 			printerComPortError = new TextWidget("Currently available serial ports.".Localize(), 0, 0, 10)
 			{
-				TextColor = ActiveTheme.Instance.PrimaryTextColor,
+				TextColor = theme.TextColor,
 				AutoExpandBoundsToText = true
 			};
 
@@ -168,7 +170,7 @@ namespace MatterHackers.MatterControl.PrinterControls.PrinterConnections
 
 			printerComPortHelpMessage = new TextWidget("The 'Serial Port' section lists all available serial\nports on your device. Changing which USB port the printer\nis connected to may change the associated serial port.\n\nTip: If you are uncertain, unplug/plug in your printer\nand hit refresh. The new port that appears should be\nyour printer.".Localize(), 0, 0, 10)
 			{
-				TextColor = ActiveTheme.Instance.PrimaryTextColor,
+				TextColor = theme.TextColor,
 				Margin = new BorderDouble(top: 10),
 				Visible = false
 			};
@@ -186,12 +188,12 @@ namespace MatterHackers.MatterControl.PrinterControls.PrinterConnections
 			return container;
 		}
 
-		private void onPrinterStatusChanged(object sender, EventArgs e)
+		private void Connection_CommunicationStateChanged(object sender, EventArgs e)
 		{
 			if (printer.Connection.IsConnected)
 			{
 				printerComPortHelpLink.Visible = false;
-				printerComPortError.TextColor = ActiveTheme.Instance.PrimaryTextColor;
+				printerComPortError.TextColor = theme.TextColor;
 				printerComPortError.Text = "Connection succeeded".Localize() + "!";
 				nextButton.Visible = true;
 				connectButton.Visible = false;
@@ -243,7 +245,7 @@ namespace MatterHackers.MatterControl.PrinterControls.PrinterConnections
 				var comPortOption = new TextWidget("No COM ports available".Localize())
 				{
 					Margin = new BorderDouble(3, 6, 5, 6),
-					TextColor = ActiveTheme.Instance.PrimaryTextColor
+					TextColor = theme.TextColor
 				};
 				comPortContainer.AddChild(comPortOption);
 			}
@@ -255,7 +257,7 @@ namespace MatterHackers.MatterControl.PrinterControls.PrinterConnections
 			{
 				HAnchor = HAnchor.Left,
 				Margin = new BorderDouble(3, 3, 5, 3),
-				TextColor = ActiveTheme.Instance.PrimaryTextColor,
+				TextColor = theme.TextColor,
 				Checked = isActivePrinterPort
 			};
 		}

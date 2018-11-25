@@ -88,10 +88,7 @@ namespace MatterHackers.MatterControl.Library
 
 		public ILibraryContainer ActiveContainer
 		{
-			get
-			{
-				return activeContainer;
-			}
+			get => activeContainer;
 			set
 			{
 				if (activeContainer == value)
@@ -226,8 +223,14 @@ namespace MatterHackers.MatterControl.Library
 
 			if (thumbnail == null && libraryContainer != null)
 			{
-				// Ask the container - allows the container to provide its own interpretation of the item thumbnail
-				thumbnail = await libraryContainer.GetThumbnail(libraryItem, thumbWidth, thumbHeight);
+				try
+				{
+					// Ask the container - allows the container to provide its own interpretation of the item thumbnail
+					thumbnail = await libraryContainer.GetThumbnail(libraryItem, thumbWidth, thumbHeight);
+				}
+				catch
+				{
+				}
 			}
 
 			if (thumbnail == null && libraryItem is IThumbnail)
@@ -265,7 +268,7 @@ namespace MatterHackers.MatterControl.Library
 				// Use the listview defaults
 				if (thumbHeight < 24 && thumbWidth < 24)
 				{
-					thumbnail = ((libraryItem is ILibraryContainerLink) ? defaultFolderIconx20 : defaultItemIconx20); ;
+					thumbnail = ((libraryItem is ILibraryContainerLink) ? defaultFolderIconx20 : defaultItemIconx20);
 
 					//if (!theme.InvertIcons)
 					//{

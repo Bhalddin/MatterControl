@@ -28,12 +28,14 @@ either expressed or implied, of the FreeBSD Project.
 */
 
 using System;
+using System.IO;
 using System.Linq;
 using MatterHackers.Agg;
+using MatterHackers.Agg.Image;
+using MatterHackers.Agg.Platform;
 using MatterHackers.Agg.UI;
 using MatterHackers.Localizations;
 using MatterHackers.MatterControl.PrinterCommunication;
-using MatterHackers.MatterControl.SlicerConfiguration;
 using MatterHackers.SerialPortCommunication.FrostedSerial;
 
 namespace MatterHackers.MatterControl.PrinterControls.PrinterConnections
@@ -46,7 +48,6 @@ namespace MatterHackers.MatterControl.PrinterControls.PrinterConnections
 		private GuiWidget connectButton;
 		private TextWidget printerErrorMessage;
 
-		private EventHandler unregisterEvents;
 		private PrinterConfig printer;
 
 		public SetupStepComPortTwo(PrinterConfig printer)
@@ -73,7 +74,7 @@ namespace MatterHackers.MatterControl.PrinterControls.PrinterConnections
 				}
 				else
 				{
-					printerErrorMessage.TextColor = ActiveTheme.Instance.PrimaryTextColor;
+					printerErrorMessage.TextColor = theme.TextColor;
 					printerErrorMessage.Text = "Attempting to connect".Localize() + "...";
 
 					printer.Settings.Helpers.SetComPort(candidatePort);
@@ -82,10 +83,18 @@ namespace MatterHackers.MatterControl.PrinterControls.PrinterConnections
 				}
 			};
 
-			printer.Connection.CommunicationStateChanged.RegisterEvent(onPrinterStatusChanged, ref unregisterEvents);
+			var backButton = theme.CreateDialogButton("<< Back".Localize());
+			backButton.Click += (s, e) =>
+			{
+				DialogWindow.ChangeToPage(new SetupStepComPortOne(printer));
+			};
 
 			this.AddPageAction(nextButton);
+			this.AddPageAction(backButton);
 			this.AddPageAction(connectButton);
+
+			// Register listeners
+			printer.Connection.CommunicationStateChanged += Connection_CommunicationStateChanged;
 		}
 
 		protected override void OnCancel(out bool abortCancel)
@@ -96,7 +105,9 @@ namespace MatterHackers.MatterControl.PrinterControls.PrinterConnections
 
 		public override void OnClosed(EventArgs e)
 		{
-			unregisterEvents?.Invoke(this, null);
+			// Unregister listeners
+			printer.Connection.CommunicationStateChanged -= Connection_CommunicationStateChanged;
+
 			base.OnClosed(e);
 		}
 
@@ -110,14 +121,14 @@ namespace MatterHackers.MatterControl.PrinterControls.PrinterConnections
 			string printerMessageOneText = "MatterControl will now attempt to auto-detect printer.".Localize();
 			TextWidget printerMessageOne = new TextWidget(printerMessageOneText, 0, 0, 10);
 			printerMessageOne.Margin = new BorderDouble(0, 10, 0, 5);
-			printerMessageOne.TextColor = ActiveTheme.Instance.PrimaryTextColor;
+			printerMessageOne.TextColor = theme.TextColor;
 			printerMessageOne.HAnchor = HAnchor.Stretch;
 			printerMessageOne.Margin = elementMargin;
 
-			string printerMessageFourBeg = "Connect printer and power on".Localize();
+			string printerMessageFourBeg = "Connect printer (make sure it is on)".Localize();
 			string printerMessageFourFull = string.Format("1.) {0}.", printerMessageFourBeg);
 			TextWidget printerMessageFour = new TextWidget(printerMessageFourFull, 0, 0, 12);
-			printerMessageFour.TextColor = ActiveTheme.Instance.PrimaryTextColor;
+			printerMessageFour.TextColor = theme.TextColor;
 			printerMessageFour.HAnchor = HAnchor.Stretch;
 			printerMessageFour.Margin = elementMargin;
 
@@ -125,22 +136,12 @@ namespace MatterHackers.MatterControl.PrinterControls.PrinterConnections
 			string printerMessageFiveTxtEnd = "Connect".Localize();
 			string printerMessageFiveTxtFull = string.Format("2.) {0} '{1}'.", printerMessageFiveTxtBeg, printerMessageFiveTxtEnd);
 			TextWidget printerMessageFive = new TextWidget(printerMessageFiveTxtFull, 0, 0, 12);
-			printerMessageFive.TextColor = ActiveTheme.Instance.PrimaryTextColor;
+			printerMessageFive.TextColor = theme.TextColor;
 			printerMessageFive.HAnchor = HAnchor.Stretch;
 			printerMessageFive.Margin = elementMargin;
 
 			GuiWidget vSpacer = new GuiWidget();
 			vSpacer.VAnchor = VAnchor.Stretch;
-
-			var manualLink = new LinkLabel("Manual Configuration".Localize(), theme)
-			{
-				Margin = new BorderDouble(0, 5),
-				TextColor =  theme.Colors.PrimaryTextColor
-			};
-			manualLink.Click += (s, e) => UiThread.RunOnIdle(() =>
-			{
-				DialogWindow.ChangeToPage(new SetupStepComPortManual(printer));
-			});
 
 			printerErrorMessage = new TextWidget("", 0, 0, 10)
 			{
@@ -153,18 +154,26 @@ namespace MatterHackers.MatterControl.PrinterControls.PrinterConnections
 			container.AddChild(printerMessageOne);
 			container.AddChild(printerMessageFour);
 			container.AddChild(printerErrorMessage);
+
+			var removeImage = AggContext.StaticData.LoadImage(Path.Combine("Images", "insert usb.png"));
+			removeImage.SetRecieveBlender(new BlenderPreMultBGRA());
+			container.AddChild(new ImageWidget(removeImage)
+			{
+				HAnchor = HAnchor.Center,
+				Margin = new BorderDouble(0, 10),
+			});
+
 			container.AddChild(vSpacer);
-			container.AddChild(manualLink);
 
 			container.HAnchor = HAnchor.Stretch;
 			return container;
 		}
 
-		private void onPrinterStatusChanged(object sender, EventArgs e)
+		private void Connection_CommunicationStateChanged(object sender, EventArgs e)
 		{
 			if (printer.Connection.IsConnected)
 			{
-				printerErrorMessage.TextColor = ActiveTheme.Instance.PrimaryTextColor;
+				printerErrorMessage.TextColor = theme.TextColor;
 				printerErrorMessage.Text = "Connection succeeded".Localize() + "!";
 				nextButton.Visible = true;
 				connectButton.Visible = false;

@@ -53,8 +53,6 @@ namespace MatterHackers.MatterControl.PrinterControls
 
 		private LimitCallingFrequency reportDestinationChanged = null;
 
-		private EventHandler unregisterEvents;
-
 		private MovementControls(PrinterConfig printer, XYZColors xyzColors, ThemeConfig theme)
 			: base (FlowDirection.TopToBottom)
 		{
@@ -72,6 +70,9 @@ namespace MatterHackers.MatterControl.PrinterControls
 			this.AddChild(jogControls);
 
 			this.AddChild(AddToDisableableList(GetHWDestinationBar()));
+
+			// Register listeners
+			printer.Connection.DestinationChanged += Connection_DestinationChanged;
 		}
 
 		public static SectionWidget CreateSection(PrinterConfig printer, ThemeConfig theme)
@@ -90,7 +91,9 @@ namespace MatterHackers.MatterControl.PrinterControls
 
 		public override void OnClosed(EventArgs e)
 		{
-			unregisterEvents?.Invoke(this, null);
+			// Unregister listeners
+			printer.Connection.DestinationChanged -= Connection_DestinationChanged;
+
 			base.OnClosed(e);
 		}
 
@@ -156,7 +159,7 @@ namespace MatterHackers.MatterControl.PrinterControls
 			// Display the current baby step offset stream values
 			var offsetStreamLabel = new TextWidget("Z Offset".Localize() + ":", pointSize: 8)
 			{
-				TextColor = ActiveTheme.Instance.PrimaryTextColor,
+				TextColor = theme.TextColor,
 				Margin = new BorderDouble(left: 10),
 				AutoExpandBoundsToText = true,
 				VAnchor = VAnchor.Center
@@ -191,9 +194,9 @@ namespace MatterHackers.MatterControl.PrinterControls
 				Padding = 0
 			};
 
-			var xPosition = new TextWidget("X: 0.0           ", pointSize: theme.DefaultFontSize, textColor: theme.Colors.PrimaryTextColor);
-			var yPosition = new TextWidget("Y: 0.0           ", pointSize: theme.DefaultFontSize, textColor: theme.Colors.PrimaryTextColor);
-			var zPosition = new TextWidget("Z: 0.0           ", pointSize: theme.DefaultFontSize, textColor: theme.Colors.PrimaryTextColor);
+			var xPosition = new TextWidget("X: 0.0           ", pointSize: theme.DefaultFontSize, textColor: theme.TextColor);
+			var yPosition = new TextWidget("Y: 0.0           ", pointSize: theme.DefaultFontSize, textColor: theme.TextColor);
+			var zPosition = new TextWidget("Z: 0.0           ", pointSize: theme.DefaultFontSize, textColor: theme.TextColor);
 
 			hwDestinationBar.AddChild(xPosition);
 			hwDestinationBar.AddChild(yPosition);
@@ -209,12 +212,12 @@ namespace MatterHackers.MatterControl.PrinterControls
 				});
 			});
 
-			printer.Connection.DestinationChanged.RegisterEvent((object sender, EventArgs e) =>
-			{
-				reportDestinationChanged.CallEvent();
-			}, ref unregisterEvents);
-
 			return hwDestinationBar;
+		}
+
+		private void Connection_DestinationChanged(object s, EventArgs e)
+		{
+			reportDestinationChanged.CallEvent();
 		}
 
 		private void SetDestinationPositionText(TextWidget xPosition, TextWidget yPosition, TextWidget zPosition)
@@ -245,10 +248,9 @@ namespace MatterHackers.MatterControl.PrinterControls
 	public class ZTuningWidget : GuiWidget
 	{
 		private TextWidget zOffsetStreamDisplay;
-		private Button clearZOffsetButton;
+		private GuiWidget clearZOffsetButton;
 		private FlowLayoutWidget zOffsetStreamContainer;
 
-		private EventHandler unregisterEvents;
 		private bool allowRemoveButton;
 		private ThemeConfig theme;
 		private PrinterSettings printerSettings;
@@ -260,14 +262,6 @@ namespace MatterHackers.MatterControl.PrinterControls
 			this.allowRemoveButton = allowRemoveButton;
 			this.HAnchor = HAnchor.Fit;
 			this.VAnchor = VAnchor.Fit | VAnchor.Center;
-
-			PrinterSettings.SettingChanged.RegisterEvent((s, e) =>
-			{
-				if ((e as StringEventArgs)?.Data == SettingsKey.baby_step_z_offset)
-				{
-					OffsetStreamChanged(null, null);
-				}
-			}, ref unregisterEvents);
 
 			zOffsetStreamContainer = new FlowLayoutWidget(FlowDirection.LeftToRight)
 			{
@@ -284,7 +278,7 @@ namespace MatterHackers.MatterControl.PrinterControls
 			zOffsetStreamDisplay = new TextWidget(zoffset.ToString("0.##"), pointSize: theme.DefaultFontSize)
 			{
 				AutoExpandBoundsToText = true,
-				TextColor = ActiveTheme.Instance.PrimaryTextColor,
+				TextColor = theme.TextColor,
 				Margin = new BorderDouble(5, 0, 8, 0),
 				VAnchor = VAnchor.Center
 			};
@@ -299,6 +293,9 @@ namespace MatterHackers.MatterControl.PrinterControls
 				printerSettings.SetValue(SettingsKey.baby_step_z_offset, "0");
 			};
 			zOffsetStreamContainer.AddChild(clearZOffsetButton);
+
+			// Register listeners
+			printerSettings.SettingChanged += Printer_SettingChanged;
 		}
 
 		internal void OffsetStreamChanged(object sender, EventArgs e)
@@ -314,8 +311,18 @@ namespace MatterHackers.MatterControl.PrinterControls
 
 		public override void OnClosed(EventArgs e)
 		{
-			unregisterEvents?.Invoke(null, null);
+			// Unregister listeners
+			printerSettings.SettingChanged -= Printer_SettingChanged;
+
 			base.OnClosed(e);
+		}
+
+		private void Printer_SettingChanged(object s, EventArgs e)
+		{
+			if ((e as StringEventArgs)?.Data == SettingsKey.baby_step_z_offset)
+			{
+				OffsetStreamChanged(null, null);
+			}
 		}
 	}
 }

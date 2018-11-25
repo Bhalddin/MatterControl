@@ -27,6 +27,7 @@ of the authors and should not be interpreted as representing official policies,
 either expressed or implied, of the FreeBSD Project.
 */
 
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using MatterHackers.Agg;
@@ -50,7 +51,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 			: base(theme)
 		{
 			this.sceneContext = sceneContext;
-			this.PopupContent = () => ShowViewOptions(sceneContext, theme);
+			this.PopupContent = ShowViewOptions;
 			this.HAnchor = HAnchor.Fit;
 			this.VAnchor = VAnchor.Fit;
 
@@ -71,6 +72,14 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 			UserSettings.Instance.SettingChanged += UserSettings_SettingChanged;
 		}
 
+		public override void OnClosed(EventArgs e)
+		{
+			// Unregister listener
+			UserSettings.Instance.SettingChanged -= UserSettings_SettingChanged;
+
+			base.OnClosed(e);
+		}
+
 		private void UserSettings_SettingChanged(object sender, StringEventArgs e)
 		{
 			if (e.Data == UserSettingsKey.defaultRenderSetting)
@@ -78,12 +87,12 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 				iconButton.SetIcon(viewIcons[sceneContext.ViewState.RenderType]);
 				if (!this.MenuVisible)
 				{
-					iconButton.FlashBackground(theme.PrimaryAccentColor.WithContrast(theme.Colors.PrimaryTextColor, 6).ToColor());
+					iconButton.FlashBackground(theme.PrimaryAccentColor.WithContrast(theme.TextColor, 6).ToColor());
 				}
 			}
 		}
 
-		private GuiWidget ShowViewOptions(BedConfig sceneContext, ThemeConfig theme)
+		private GuiWidget ShowViewOptions()
 		{
 			var popupMenu = new PopupMenu(ApplicationController.Instance.MenuTheme);
 

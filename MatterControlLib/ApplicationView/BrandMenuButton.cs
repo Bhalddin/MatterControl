@@ -67,7 +67,7 @@ namespace MatterHackers.MatterControl
 				Selectable = false
 			});
 
-			row.AddChild(new TextWidget(ApplicationController.Instance.ShortProductName, textColor: theme.Colors.PrimaryTextColor)
+			row.AddChild(new TextWidget(ApplicationController.Instance.ShortProductName, textColor: theme.TextColor)
 			{
 				VAnchor = VAnchor.Center
 			});
@@ -140,34 +140,13 @@ namespace MatterHackers.MatterControl
 
 			popupMenu.CreateSeparator();
 
-			var themeRow = new GuiWidget()
-			{
-				HAnchor = HAnchor.Stretch,
-				VAnchor = VAnchor.Fit,
-			};
-
-			themeRow.AddChild(new TextWidget("Theme".Localize(), pointSize: menuTheme.DefaultFontSize, textColor: menuTheme.Colors.PrimaryTextColor)
-			{
-				VAnchor = VAnchor.Center,
-			});
-
-			themeRow.AddChild(new ThemeColorPanel.AccentColorsWidget(AppContext.ThemeSet, 16, 2)
-			{
-				HAnchor = HAnchor.Right
-			});
-
-			menuItem = popupMenu.CreateMenuItem(themeRow, "Theme", AggContext.StaticData.LoadIcon("theme.png", 16, 16, menuTheme.InvertIcons));
-			menuItem.Padding = menuItem.Padding.Clone(right: 5);
-
-			popupMenu.CreateSeparator();
-
 			var imageBuffer = new ImageBuffer(18, 18);
 
 			// x64 indicator icon
 			if (IntPtr.Size == 8)
 			{
 				var graphics = imageBuffer.NewGraphics2D();
-				graphics.Clear(menuTheme.ActiveTabColor);
+				graphics.Clear(menuTheme.BackgroundColor);
 				graphics.Rectangle(imageBuffer.GetBoundingRect(), menuTheme.PrimaryAccentColor);
 				graphics.DrawString("64", imageBuffer.Width / 2, imageBuffer.Height / 2, 8, Agg.Font.Justification.Center, Agg.Font.Baseline.BoundsCenter, color: menuTheme.PrimaryAccentColor);
 			}

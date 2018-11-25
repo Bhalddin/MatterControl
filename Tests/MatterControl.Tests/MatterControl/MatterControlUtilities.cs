@@ -128,7 +128,7 @@ namespace MatterHackers.MatterControl.Tests.Automation
 
 		public static string PathToExportGcodeFolder
 		{
-			get { return TestContext.CurrentContext.ResolveProjectPath(4, "Tests", "TestData", "ExportedGcode", runName); }
+			get => TestContext.CurrentContext.ResolveProjectPath(4, "Tests", "TestData", "ExportedGcode", runName);
 		}
 
 		public static string GetTestItemPath(string queueItemToLoad)
@@ -239,6 +239,12 @@ namespace MatterHackers.MatterControl.Tests.Automation
 
 			testRunner.WaitForName("Disconnect from printer button");
 
+			testRunner.Delay();
+			if (testRunner.NamedWidgetExists("Already Loaded Button"))
+			{
+				testRunner.ClickByName("Already Loaded Button");
+			}
+
 			// Access through static instance must occur after Connect has occurred and the port has spun up
 			Emulator.Instance.RunSlow = runSlow;
 
@@ -293,11 +299,13 @@ namespace MatterHackers.MatterControl.Tests.Automation
 
 		public static void DeleteSelectedPrinter(AutomationRunner testRunner)
 		{
-			// delete printer
+			// Click 'Delete Printer' menu item
 			testRunner.ClickByName("Printer Overflow Menu");
 			testRunner.ClickByName("Delete Printer Menu Item");
 
-			testRunner.WaitForReloadAll(() => testRunner.ClickByName("Yes Button"));
+			// Confirm Delete
+			testRunner.WaitForName("HeaderRow");
+			testRunner.ClickByName("Yes Button");
 		}
 
 		public static void AddAndSelectPrinter(this AutomationRunner testRunner, string make = "Airwolf 3D", string model = "HD")
@@ -453,6 +461,7 @@ namespace MatterHackers.MatterControl.Tests.Automation
 					if (testRunner.NameExists("Library Row Item Collection"))
 					{
 						testRunner.DoubleClickByName("Library Row Item Collection");
+						testRunner.Delay();
 					}
 
 					break;
@@ -764,13 +773,19 @@ namespace MatterHackers.MatterControl.Tests.Automation
 		/// <param name="testRunner"></param>
 		public static void OpenPrintPopupMenu(this AutomationRunner testRunner)
 		{
-			var printerConnection = ApplicationController.Instance.ActivePrinter.Connection;
+			var printerConnection = ApplicationController.Instance.DragDropData.View3DWidget.Printer.Connection;
 
 			if (printerConnection.CommunicationState != CommunicationStates.Connected
 				&& printerConnection.CommunicationState != CommunicationStates.FinishedPrint)
 			{
 				testRunner.ClickByName("Connect to printer button");
 				testRunner.WaitFor(() => printerConnection.CommunicationState == CommunicationStates.Connected);
+			}
+
+			if (testRunner.NamedWidgetExists("Finish Setup Button"))
+			{
+				testRunner.ClickByName("Finish Setup Button");
+				testRunner.ClickByName("Already Loaded Button");
 			}
 
 			// Wait for button to become enabled
@@ -857,8 +872,6 @@ namespace MatterHackers.MatterControl.Tests.Automation
 
 			waitForPageAndAdvance("Print Leveling Overview");
 
-			waitForPageAndAdvance("Select Material");
-
 			waitForPageAndAdvance("Homing The Printer");
 
 			waitForPageAndAdvance("Waiting For Printer To Heat");
@@ -885,6 +898,12 @@ namespace MatterHackers.MatterControl.Tests.Automation
 			}
 
 			testRunner.ClickByName("Done Button");
+
+			testRunner.Delay();
+			if (testRunner.NameExists("Already Loaded Button"))
+			{
+				testRunner.ClickByName("Already Loaded Button");
+			}
 		}
 
 		/// <summary>
@@ -1012,10 +1031,10 @@ namespace MatterHackers.MatterControl.Tests.Automation
 		/// </summary>
 		/// <param name="testRunner"></param>
 		/// <param name="assetNames">The test assets to add to the library</param>
-		public static void AddTestAssetsToLibrary(this AutomationRunner testRunner, params string[] assetNames)
+		public static void AddTestAssetsToLibrary(this AutomationRunner testRunner, IEnumerable<string> assetNames, string targetLibrary = "Local Library Row Item Collection")
 		{
 			// Switch to the Local Library tab
-			testRunner.NavigateToFolder("Local Library Row Item Collection");
+			testRunner.NavigateToFolder(targetLibrary);
 
 			// Assert that the requested items are *not* in the list
 			foreach (string assetName in assetNames)
@@ -1035,7 +1054,13 @@ namespace MatterHackers.MatterControl.Tests.Automation
 			foreach (string assetName in assetNames)
 			{
 				string friendlyName = Path.GetFileNameWithoutExtension(assetName);
-				Assert.IsTrue(testRunner.WaitForName($"Row Item {friendlyName}"), $"{friendlyName} part should exist after adding");
+				string fileName = Path.GetFileName(assetName);
+
+				// Look for either expected format (print queue differs from libraries)
+				Assert.IsTrue(
+					testRunner.WaitForName($"Row Item {friendlyName}", 2)
+					|| testRunner.WaitForName($"Row Item {fileName}", 2),
+					$"{friendlyName} part should exist after adding");
 			}
 		}
 

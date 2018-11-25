@@ -38,10 +38,12 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 		private UIField uiField;
 		private Color textColor;
 		private ThemeConfig theme;
+		private PrinterConfig printer;
 		private SliceSettingData settingData;
 
-		public DropMenuWrappedField(UIField uiField, SliceSettingData settingData, Color textColor, ThemeConfig theme)
+		public DropMenuWrappedField(UIField uiField, SliceSettingData settingData, Color textColor, ThemeConfig theme, PrinterConfig printer)
 		{
+			this.printer = printer;
 			this.settingData = settingData;
 			this.uiField = uiField;
 			this.textColor = textColor;
@@ -91,15 +93,12 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 			uiField.Content.VAnchor = VAnchor.Center;
 			totalContent.AddChild(uiField.Content);
 
-			EventHandler localUnregisterEvents = null;
-
-			PrinterSettings.SettingChanged.RegisterEvent((sender, e) =>
+			void Printer_SettingChanged(object s, EventArgs e)
 			{
 				if (e is StringEventArgs stringArgs
 					&& stringArgs.Data == settingData.SlicerConfigName)
 				{
-					var activePrinter = ApplicationController.Instance.ActivePrinter;
-					string newSliceSettingValue = activePrinter.Settings.GetValue(settingData.SlicerConfigName);
+					string newSliceSettingValue = printer.Settings.GetValue(settingData.SlicerConfigName);
 
 					bool foundSetting = false;
 					foreach (QuickMenuNameValue nameValue in settingData.QuickMenuSettings)
@@ -118,12 +117,10 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 						selectableOptions.SelectedLabel = "Custom";
 					}
 				}
-			}, ref localUnregisterEvents);
+			}
 
-			totalContent.Closed += (s, e) =>
-			{
-				localUnregisterEvents?.Invoke(s, null);
-			};
+			printer.Settings.SettingChanged += Printer_SettingChanged;
+			printer.Disposed += (s, e) => printer.Settings.SettingChanged -= Printer_SettingChanged;
 
 			this.Content = totalContent;
 		}

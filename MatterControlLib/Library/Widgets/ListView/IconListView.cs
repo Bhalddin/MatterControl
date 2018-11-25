@@ -29,7 +29,6 @@ either expressed or implied, of the FreeBSD Project.
 
 using System;
 using System.Collections.Generic;
-using System.Threading;
 using MatterHackers.Agg;
 using MatterHackers.Agg.Image;
 using MatterHackers.Agg.Platform;
@@ -38,32 +37,19 @@ using MatterHackers.VectorMath;
 
 namespace MatterHackers.MatterControl.CustomWidgets
 {
-	public class IconListView : FlowLayoutWidget, IListContentView
+	public class IconListView : IconView
 	{
-		public int ThumbWidth { get; set; } = 100;
-		public int ThumbHeight { get; set; } = 100;
-
 		private FlowLayoutWidget rowButtonContainer = null;
 
 		private int cellIndex = 0;
 		private int columnCount = 1;
-		private int iconViewPadding = IconViewItem.ItemPadding;
-		private double leftRightMargin;
 		private int reflownWidth = -1;
-		private ThemeConfig theme;
 
 		private List<IconViewItem> allIconViews = new List<IconViewItem>();
 
 		public IconListView(ThemeConfig theme, int thumbnailSize = -1)
-			: base(FlowDirection.TopToBottom)
+			: base(theme, thumbnailSize)
 		{
-			this.theme = theme;
-
-			if (thumbnailSize != -1)
-			{
-				this.ThumbHeight = thumbnailSize;
-				this.ThumbWidth = thumbnailSize;
-			}
 		}
 
 		public override void OnBoundsChanged(EventArgs e)
@@ -74,6 +60,17 @@ namespace MatterHackers.MatterControl.CustomWidgets
 			}
 
 			base.OnBoundsChanged(e);
+		}
+
+		private void Row_Click(object sender, MouseEventArgs e)
+		{
+			if (sender is GuiWidget guiWidget)
+			{
+				var screenPosition = guiWidget.TransformToScreenSpace(e.Position);
+				var thisPosition = this.TransformFromScreenSpace(screenPosition);
+				var thisMouseClick = new MouseEventArgs(e, thisPosition.X, thisPosition.Y);
+				OnClick(thisMouseClick);
+			}
 		}
 
 		private void LayoutIcons()
@@ -93,6 +90,11 @@ namespace MatterHackers.MatterControl.CustomWidgets
 					{
 						iconView.Parent?.RemoveChild(iconView);
 						iconView.Margin = new BorderDouble(leftRightMargin, 0);
+					}
+
+					foreach(var child in Children)
+					{
+						child.Click -= Row_Click;
 					}
 
 					this.CloseAllChildren();
@@ -150,7 +152,7 @@ namespace MatterHackers.MatterControl.CustomWidgets
 			return newColumnCount;
 		}
 
-		public ListViewItemBase AddItem(ListViewItem item)
+		public override ListViewItemBase AddItem(ListViewItem item)
 		{
 			var iconView = new IconViewItem(item, this.ThumbWidth, this.ThumbHeight, theme);
 			iconView.Margin = new BorderDouble(leftRightMargin, 0);
@@ -173,6 +175,7 @@ namespace MatterHackers.MatterControl.CustomWidgets
 					Margin = new BorderDouble(bottom: 6)
 				};
 				this.AddChild(rowButtonContainer);
+				rowButtonContainer.Click += Row_Click;
 			}
 
 			rowButtonContainer?.AddChild(iconView);
@@ -184,7 +187,7 @@ namespace MatterHackers.MatterControl.CustomWidgets
 			}
 		}
 
-		public void ClearItems()
+		public override void ClearItems()
 		{
 			cellIndex = 0;
 			rowButtonContainer = null;
@@ -195,16 +198,63 @@ namespace MatterHackers.MatterControl.CustomWidgets
 
 		private bool reloading = false;
 
-		public void BeginReload()
+		public override void BeginReload()
 		{
 			reloading = true;
 			columnCount = RecomputeFlowValues(1);
 		}
 
-		public void EndReload()
+		public override void EndReload()
 		{
 			reloading = false;
 			this.LayoutIcons();
+		}
+	}
+
+	public class IconView : FlowLayoutWidget, IListContentView
+	{
+		public int ThumbWidth { get; set; } = 100;
+		public int ThumbHeight { get; set; } = 100;
+		protected int iconViewPadding = IconViewItem.ItemPadding;
+		protected ThemeConfig theme;
+		protected double leftRightMargin;
+
+		public IconView(ThemeConfig theme, int thumbnailSize = -1)
+			: base(FlowDirection.TopToBottom)
+		{
+			this.theme = theme;
+
+			if (thumbnailSize != -1)
+			{
+				this.ThumbHeight = thumbnailSize;
+				this.ThumbWidth = thumbnailSize;
+			}
+		}
+
+		public virtual ListViewItemBase AddItem(ListViewItem item)
+		{
+			var iconView = new IconViewItem(item, this.ThumbWidth, this.ThumbHeight, theme)
+			{
+				Margin = new BorderDouble(leftRightMargin, 6, leftRightMargin, 0),
+				HAnchor = HAnchor.Center
+			};
+
+			this.AddChild(iconView);
+
+			return iconView;
+		}
+
+		public virtual void BeginReload()
+		{
+		}
+
+		public virtual void EndReload()
+		{
+		}
+
+		public virtual void ClearItems()
+		{
+			this.CloseAllChildren();
 		}
 	}
 
@@ -260,7 +310,7 @@ namespace MatterHackers.MatterControl.CustomWidgets
 				};
 				container.AddChild(imageWidget);
 
-				text = new TextWidget(item.Model.Name, 0, 0, 9, textColor: ActiveTheme.Instance.PrimaryTextColor)
+				text = new TextWidget(item.Model.Name, 0, 0, 9, textColor: theme.TextColor)
 				{
 					AutoExpandBoundsToText = false,
 					EllipsisIfClipped = true,

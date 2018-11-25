@@ -24,8 +24,6 @@ namespace MatterHackers.MatterControl
 	{
 		private GuiWidget nextButton;
 
-		private EventHandler unregisterEvents;
-
 		private CriteriaRow connectToPrinterRow;
 
 		// Used in Android
@@ -52,13 +50,13 @@ namespace MatterHackers.MatterControl
 
 			this.AddPageAction(nextButton);
 
-			// Register for connection notifications
-			printer.Connection.CommunicationStateChanged.RegisterEvent(ConnectionStatusChanged, ref unregisterEvents);
+			// Register listeners
+			printer.Connection.CommunicationStateChanged += Connection_CommunicationStateChanged;
 		}
 
-		public void ConnectionStatusChanged(object test, EventArgs args)
+		public void Connection_CommunicationStateChanged(object test, EventArgs args)
 		{
-			if(printer.Connection.CommunicationState == CommunicationStates.Connected && connectToPrinterRow != null)
+			if (printer.Connection.CommunicationState == CommunicationStates.Connected && connectToPrinterRow != null)
 			{
 				connectToPrinterRow.SetSuccessful();
 				nextButton.Visible = true;
@@ -71,18 +69,20 @@ namespace MatterHackers.MatterControl
 
 			UiThread.RunOnIdle(() =>
 			{
-				this.DialogWindow.ChangeToPage<AndroidConnectDevicePage>();
+				this.DialogWindow.ChangeToPage(new AndroidConnectDevicePage(printer));
 			});
 		}
 
 		public override void OnClosed(EventArgs e)
 		{
-			if(checkForPermissionTimer != null)
+			// Unregister listeners
+			printer.Connection.CommunicationStateChanged -= Connection_CommunicationStateChanged;
+
+			if (checkForPermissionTimer != null)
 			{
 				checkForPermissionTimer.Dispose();
 			}
 
-			unregisterEvents?.Invoke(this, null);
 			base.OnClosed(e);
 		}
 
@@ -96,7 +96,7 @@ namespace MatterHackers.MatterControl
 			// Regen and refresh the troubleshooting criteria
 			var printerNameLabel = new TextWidget(string.Format("{0}:", "Connection Troubleshooting".Localize()), 0, 0, labelFontSize)
 			{
-				TextColor = theme.Colors.PrimaryTextColor,
+				TextColor = theme.TextColor,
 				Margin = new BorderDouble(bottom: 10)
 			};
 

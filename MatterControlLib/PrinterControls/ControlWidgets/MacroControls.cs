@@ -54,7 +54,12 @@ namespace MatterHackers.MatterControl.PrinterControls
 
 			ApplicationController.Instance.ActiveProfileModified.RegisterEvent((s, e) =>
 			{
-				UiThread.RunOnIdle(() => Rebuild());
+				if (s is PrinterSettings settings
+					&& settings.ID == this.printer.Settings.ID)
+				{
+					UiThread.RunOnIdle(() => Rebuild());
+				}
+
 			}, ref unregisterEvents);
 		}
 
@@ -76,7 +81,7 @@ namespace MatterHackers.MatterControl.PrinterControls
 
 			if (!printer.Settings.Macros.Any())
 			{
-				var noMacrosFound = new TextWidget("No macros are currently set up for this printer.".Localize(), pointSize: 10, textColor: theme.Colors.PrimaryTextColor);
+				var noMacrosFound = new TextWidget("No macros are currently set up for this printer.".Localize(), pointSize: 10, textColor: theme.TextColor);
 				this.AddChild(noMacrosFound);
 			}
 			else

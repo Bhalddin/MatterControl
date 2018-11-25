@@ -1,5 +1,5 @@
 ﻿/*
-Copyright (c) 2017, Kevin Pope, John Lewin
+Copyright (c) 2018, Kevin Pope, John Lewin
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -46,7 +46,6 @@ namespace MatterHackers.MatterControl.ActionBar
 
 		protected ImageWidget ImageWidget;
 
-		protected EventHandler unregisterEvents;
 		protected PrinterConfig printer;
 		protected List<GuiWidget> alwaysEnabled;
 
@@ -86,17 +85,17 @@ namespace MatterHackers.MatterControl.ActionBar
 
 			CurrentTempIndicator = new TextWidget(textValue, pointSize: 11)
 			{
-				TextColor = theme.Colors.PrimaryTextColor,
+				TextColor = theme.TextColor,
 				VAnchor = VAnchor.Center,
 				AutoExpandBoundsToText = true
 			};
 			container.AddChild(CurrentTempIndicator);
 
-			container.AddChild(new TextWidget("/") { TextColor = theme.Colors.PrimaryTextColor });
+			container.AddChild(new TextWidget("/") { TextColor = theme.TextColor });
 
 			goalTempIndicator = new TextWidget(textValue, pointSize: 11)
 			{
-				TextColor = theme.Colors.PrimaryTextColor,
+				TextColor = theme.TextColor,
 				VAnchor = VAnchor.Center,
 				AutoExpandBoundsToText = true
 			};
@@ -104,17 +103,15 @@ namespace MatterHackers.MatterControl.ActionBar
 
 			DirectionIndicator = new TextWidget(textValue, pointSize: 11)
 			{
-				TextColor = theme.Colors.PrimaryTextColor,
+				TextColor = theme.TextColor,
 				VAnchor = VAnchor.Center,
 				AutoExpandBoundsToText = true,
 				Margin = new BorderDouble(left: 5)
 			};
 			container.AddChild(DirectionIndicator);
 
-			printer.Connection.CommunicationStateChanged.RegisterEvent((s, e) =>
-			{
-				this.EnableControls();
-			}, ref unregisterEvents);
+			// Register listeners
+			printer.Connection.CommunicationStateChanged += Connection_CommunicationStateChanged;
 
 			foreach (var child in this.Children)
 			{
@@ -155,17 +152,25 @@ namespace MatterHackers.MatterControl.ActionBar
 
 		public override void OnClosed(EventArgs e)
 		{
-			unregisterEvents?.Invoke(this, null);
+			// Unregister listeners
+			printer.Connection.CommunicationStateChanged -= Connection_CommunicationStateChanged;
+
 			base.OnClosed(e);
 		}
 
 		bool? isEnabled = null;
 
+		private void Connection_CommunicationStateChanged(object s, EventArgs e)
+		{
+			this.EnableControls();
+		}
+
 		private void EnableControls()
 		{
-			if (isEnabled != printer.Connection.IsConnected && !printer.Connection.PrinterIsPrinting)
+			bool status =  printer.Connection.IsConnected && !printer.Connection.PrinterIsPrinting;
+			if (isEnabled != status)
 			{
-				isEnabled = printer.Connection.IsConnected && !printer.Connection.PrinterIsPrinting;
+				isEnabled = status;
 
 				var flowLayout = this.PopupContent.Children.OfType<FlowLayoutWidget>().FirstOrDefault();
 				if (flowLayout != null)
@@ -177,7 +182,5 @@ namespace MatterHackers.MatterControl.ActionBar
 				}
 			}
 		}
-
-
 	}
 }

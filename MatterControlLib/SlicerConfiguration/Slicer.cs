@@ -196,34 +196,6 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 			return mergeString;
 		}
 
-		public static Task<bool> SliceFile(string sourceFile, string gcodeFilePath, PrinterConfig printer, IProgress<ProgressStatus> progressReporter, CancellationToken cancellationToken)
-		{
-			var progressStatus = new ProgressStatus()
-			{
-				Status = "Loading"
-			};
-			progressReporter.Report(progressStatus);
-
-			IObject3D object3D;
-
-			if (string.Equals(Path.GetExtension(sourceFile), ".mcx", StringComparison.OrdinalIgnoreCase))
-			{
-				object3D = Object3D.Load(sourceFile, cancellationToken, null, (ratio, status) =>
-				{
-					progressStatus.Progress0To1 = ratio;
-					progressStatus.Status = status;
-				});
-			}
-			else
-			{
-				object3D = new Object3D()
-				{
-					MeshPath = sourceFile
-				};
-			}
-
-			return SliceItem(object3D, gcodeFilePath, printer, progressReporter, cancellationToken);
-		}
 
 		public static Task<bool> SliceItem(IObject3D object3D, string gcodeFilePath, PrinterConfig printer, IProgress<ProgressStatus> progressReporter, CancellationToken cancellationToken)
 		{
@@ -283,7 +255,7 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 						matrixAndMeshArgs.Append($" \"{matrixAndFile.fileName}\" ");
 					}
 
-					EngineMappingsMatterSlice.WriteSliceSettingsFile(configFilePath, rawLines: new[]
+					printer.EngineMappingsMatterSlice.WriteSliceSettingsFile(configFilePath, rawLines: new[]
 					{
 						$"booleanOperations = {mergeRules}",
 						$"additionalArgsToProcess ={matrixAndMeshArgs}"
@@ -291,21 +263,22 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 
 					commandArgs = $"-v -o \"{gcodeFilePath}\" -c \"{configFilePath}\"";
 
+					bool forcedExit = false;
+
 					if (AggContext.OperatingSystem == OSType.Android
 						|| AggContext.OperatingSystem == OSType.Mac
 						|| RunInProcess)
 					{
 						EventHandler WriteOutput = (s, e) =>
 						{
-							if(cancellationToken.IsCancellationRequested)
+							if (cancellationToken.IsCancellationRequested)
 							{
 								MatterHackers.MatterSlice.MatterSlice.Stop();
+								forcedExit = true;
 							}
+
 							if (s is string stringValue)
 							{
-
-
-
 								sliceProgressReporter?.Report(new ProgressStatus()
 								{
 									Status = stringValue
@@ -318,11 +291,11 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 						MatterSlice.MatterSlice.ProcessArgs(commandArgs);
 
 						MatterSlice.LogOutput.GetLogWrites -= WriteOutput;
+
+						slicingSucceeded = !forcedExit;
 					}
 					else
 					{
-						bool forcedExit = false;
-
 						var slicerProcess = new Process()
 						{
 							StartInfo = new ProcessStartInfo()
@@ -378,7 +351,8 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 
 				try
 				{
-					if (File.Exists(gcodeFilePath)
+					if (slicingSucceeded
+						&& File.Exists(gcodeFilePath)
 						&& File.Exists(configFilePath))
 					{
 						// make sure we have not already written the settings onto this file

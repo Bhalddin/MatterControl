@@ -109,7 +109,6 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 		private int groupPanelCount = 0;
 		private List<(GuiWidget widget, SliceSettingData settingData)> settingsRows;
 		private TextWidget filteredItemsHeading;
-		private EventHandler unregisterEvents;
 		private Action<PopupMenu> externalExtendMenu;
 		private string scopeName;
 
@@ -163,7 +162,7 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 				};
 
 				// Add heading for My Settings view
-				searchPanel.AddChild(filteredItemsHeading = new TextWidget("My Modified Settings", pointSize: theme.DefaultFontSize, textColor: theme.Colors.PrimaryTextColor)
+				searchPanel.AddChild(filteredItemsHeading = new TextWidget("My Modified Settings", pointSize: theme.DefaultFontSize, textColor: theme.TextColor)
 				{
 					Margin = new BorderDouble(left: 10),
 					HAnchor = HAnchor.Left,
@@ -179,14 +178,11 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 					VAnchor = VAnchor.Stretch,
 				};
 				scrollable.ScrollArea.HAnchor = HAnchor.Stretch;
-				//scrollable.ScrollArea.VAnchor = VAnchor.Fit;
 
 				var tabContainer = new FlowLayoutWidget(FlowDirection.TopToBottom)
 				{
 					VAnchor = VAnchor.Fit,
 					HAnchor = HAnchor.Stretch,
-					//DebugShowBounds = true,
-					//MinimumSize = new Vector2(200, 200)
 				};
 
 				scrollable.AddChild(tabContainer);
@@ -271,7 +267,7 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 								{
 									Name = category.Name + " Tab",
 									InactiveTabColor = Color.Transparent,
-									ActiveTabColor = theme.ActiveTabColor
+									ActiveTabColor = theme.BackgroundColor
 								});
 						}
 					}
@@ -319,25 +315,8 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 					}
 				};
 
-				PrinterSettings.SettingChanged.RegisterEvent((s, e) =>
-				{
-					if (e is StringEventArgs stringEvent)
-					{
-						string settingsKey = stringEvent.Data;
-						if (this.allUiFields.TryGetValue(settingsKey, out UIField uifield))
-						{
-							string currentValue = settingsContext.GetValue(settingsKey);
-							if (uifield.Value != currentValue
-								|| settingsKey == "com_port")
-							{
-								uifield.SetValue(
-									currentValue,
-									userInitiated: false);
-							}
-						}
-					}
-				},
-				ref unregisterEvents);
+				// Register listeners
+				printer.Settings.SettingChanged += Printer_SettingChanged;
 			}
 
 			this.PerformLayout();
@@ -438,7 +417,7 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 						// settingShouldBeShown / addedSettingToSubGroup / needToAddSubGroup
 						bool settingShouldBeShown = CheckIfShouldBeShown(settingData, settingsContext);
 
-						if (EngineMappingsMatterSlice.Instance.MapContains(settingData.SlicerConfigName)
+						if (printer.EngineMappingsMatterSlice.MapContains(settingData.SlicerConfigName)
 							&& settingShouldBeShown)
 						{
 							settingsRow = CreateItemRow(settingData);
@@ -591,7 +570,7 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 					row.AddChild(new TextWidget(title, pointSize: 9)
 					{
 						Margin = new BorderDouble(0, 4, 10, 4),
-						TextColor = theme.Colors.PrimaryTextColor,
+						TextColor = theme.TextColor,
 					});
 
 					row.AddChild(new HorizontalSpacer());
@@ -599,7 +578,7 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 					row.AddChild(new TextWidget(lastUpdateTime, pointSize: 9)
 					{
 						Margin = new BorderDouble(0, 4, 10, 4),
-						TextColor = theme.Colors.PrimaryTextColor,
+						TextColor = theme.TextColor,
 					});
 				}
 
@@ -745,7 +724,7 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 
 				case SliceSettingData.DataEditTypes.OFFSET2:
 					placeFieldInDedicatedRow = true;
-					uiField = new ExtruderOffsetField(settingsContext, settingData.SlicerConfigName, theme.Colors.PrimaryTextColor, theme);
+					uiField = new ExtruderOffsetField(settingsContext, settingData.SlicerConfigName, theme.TextColor, theme);
 					break;
 #if !__ANDROID__
 				case SliceSettingData.DataEditTypes.IP_LIST:
@@ -757,7 +736,7 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 					// Missing Setting
 					settingsRow.AddContent(new TextWidget($"Missing the setting for '{settingData.DataEditType}'.")
 					{
-						TextColor = theme.Colors.PrimaryTextColor,
+						TextColor = theme.TextColor,
 						BackgroundColor = Color.Red
 					});
 					break;
@@ -808,7 +787,7 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 				if (settingData.QuickMenuSettings.Count > 0
 					&& settingData.SlicerConfigName == "baud_rate")
 				{
-					var dropMenu = new DropMenuWrappedField(uiField, settingData, theme.Colors.PrimaryTextColor, theme);
+					var dropMenu = new DropMenuWrappedField(uiField, settingData, theme.TextColor, theme, printer);
 					dropMenu.Initialize(tabIndexForItem);
 
 					settingsRow.AddContent(dropMenu.Content);
@@ -883,12 +862,7 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 		{
 			foreach (var item in this.settingsRows)
 			{
-				var settingData = item.settingData;
-
-				// var layerValues = printer.Settings.GetLayerValues(settingData.SlicerConfigName);
-				// var (currentValue, layerName) = printer.Settings.GetValueAndLayerName(settingData.SlicerConfigName, printer.Settings.defaultLayerCascade);
-
-				item.widget.Visible = printer.Settings.IsOverride(settingData.SlicerConfigName);
+				item.widget.Visible = printer.Settings.IsOverride(item.settingData.SlicerConfigName);
 			}
 
 			filteredItemsHeading.Visible = true;
@@ -900,6 +874,25 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 		}
 
 		List<SectionWidget> widgetsThatWereExpanded = new List<SectionWidget>();
+
+		private void Printer_SettingChanged(object s, EventArgs e)
+		{
+			if (e is StringEventArgs stringEvent)
+			{
+				string settingsKey = stringEvent.Data;
+				if (this.allUiFields.TryGetValue(settingsKey, out UIField uifield))
+				{
+					string currentValue = settingsContext.GetValue(settingsKey);
+					if (uifield.Value != currentValue
+						|| settingsKey == "com_port")
+					{
+						uifield.SetValue(
+							currentValue,
+							userInitiated: false);
+					}
+				}
+			}
+		}
 
 		private void ShowFilteredView()
 		{
@@ -925,7 +918,9 @@ namespace MatterHackers.MatterControl.SlicerConfiguration
 
 		public override void OnClosed(EventArgs e)
 		{
-			unregisterEvents?.Invoke(this, null);
+			// Unregister listeners
+			printer.Settings.SettingChanged -= Printer_SettingChanged;
+
 			base.OnClosed(e);
 		}
 

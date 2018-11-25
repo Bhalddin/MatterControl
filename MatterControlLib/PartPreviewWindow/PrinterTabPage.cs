@@ -53,7 +53,6 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 		internal PrinterActionsBar printerActionsBar;
 		private DockingTabControl sideBar;
 		private SliceSettingsWidget sliceSettingsWidget;
-		private EventHandler unregisterEvents;
 
 		public PrinterTabPage(PrinterConfig printer, ThemeConfig theme, string tabTitle)
 			: base(printer, printer.Bed, theme, tabTitle)
@@ -219,11 +218,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 
 			printer.Bed.RendererOptions.PropertyChanged += RendererOptions_PropertyChanged;
 
-			printer.Connection.CommunicationStateChanged.RegisterEvent((s, e) =>
-			{
-				this.SetSliderVisibility();
-			}, ref unregisterEvents);
-
+			printer.Connection.CommunicationStateChanged += Connection_CommunicationStateChanged;
 		}
 
 		private void RendererOptions_PropertyChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -389,9 +384,9 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 
 		public override void OnClosed(EventArgs e)
 		{
-			unregisterEvents?.Invoke(null, null);
-
+			// Unregister listeners
 			sceneContext.LoadedGCodeChanged -= BedPlate_LoadedGCodeChanged;
+			printer.Connection.CommunicationStateChanged -= Connection_CommunicationStateChanged;
 			printer.ViewState.VisibilityChanged -= ProcessOptionalTabs;
 			printer.ViewState.ViewModeChanged -= ViewState_ViewModeChanged;
 			printer.Bed.RendererOptions.PropertyChanged -= RendererOptions_PropertyChanged;
@@ -466,6 +461,11 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 			sideBar.Rebuild();
 		}
 
+		private void Connection_CommunicationStateChanged(object s, EventArgs e)
+		{
+			this.SetSliderVisibility();
+		}
+
 		public static GuiWidget PrintProgressWidget(PrinterConfig printer, ThemeConfig theme)
 		{
 			var bodyRow = new GuiWidget()
@@ -529,25 +529,29 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 					UiThread.RunOnIdle(async () =>
 					{
 						if (!activelySlicing
-							&& printer.Settings.IsValid()
+							&& SettingsValidation.SettingsValid(printer)
 							&& printer.Bed.EditContext.SourceItem != null)
 						{
 							activelySlicing = true;
 							if (bottomRow.Name == null)
 							{
-								bottomRow.Name = printer.Bed.EditContext.GCodeFilePath;
+								bottomRow.Name = printer.Bed.EditContext.GCodeFilePath(printer);
 							}
+
 							await ApplicationController.Instance.Tasks.Execute("Saving".Localize(), printer.Bed.SaveChanges);
-							// start up a new slice on a backgroud thread
+
+							// start up a new slice on a background thread
 							await ApplicationController.Instance.SliceItemLoadOutput(
 								printer,
 								printer.Bed.Scene,
-								printer.Bed.EditContext.GCodeFilePath);
+								printer.Bed.EditContext.GCodeFilePath(printer));
+
 							// Switch to the 3D layer view if on Model view
 							if (printer.ViewState.ViewMode == PartViewMode.Model)
 							{
 								printer.ViewState.ViewMode = PartViewMode.Layers3D;
 							}
+
 							// when it is done queue it to the change to gcode stream
 							var message2 = "Would you like to switch to the new G-Code? Before you switch, check that your are seeing the changes you expect.".Localize();
 							var caption2 = "Switch to new G-Code?".Localize();
@@ -558,8 +562,8 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 									if (printer.Connection != null
 										&& (printer.Connection.PrinterIsPrinting || printer.Connection.PrinterIsPaused))
 									{
-										printer.Connection.SwitchToGCode(printer.Bed.EditContext.GCodeFilePath);
-										bottomRow.Name = printer.Bed.EditContext.GCodeFilePath;
+										printer.Connection.SwitchToGCode(printer.Bed.EditContext.GCodeFilePath(printer));
+										bottomRow.Name = printer.Bed.EditContext.GCodeFilePath(printer);
 									}
 								}
 								else
@@ -587,7 +591,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 				VAnchor = VAnchor.Center
 			});
 
-			var timeWidget = new TextWidget("", pointSize: 22, textColor: theme.Colors.PrimaryTextColor)
+			var timeWidget = new TextWidget("", pointSize: 22, textColor: theme.TextColor)
 			{
 				AutoExpandBoundsToText = true,
 				Margin = new BorderDouble(10, 0, 0, 0),
@@ -625,7 +629,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 							break;
 					}
 				}, 1);
-			bodyRow.Closed += (s, e) => runningInterval.Continue = false;
+			bodyRow.Closed += (s, e) => UiThread.ClearInterval(runningInterval);
 
 			bodyRow.Visible = false;
 

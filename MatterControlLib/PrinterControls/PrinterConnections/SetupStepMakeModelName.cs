@@ -126,7 +126,7 @@ namespace MatterHackers.MatterControl.PrinterControls.PrinterConnections
 				var commonMargin = new BorderDouble(4, 2);
 
 				// Create export button for each plugin
-				signInRadioButton = new RadioButton(new RadioButtonViewText("Sign in to access your existing printers".Localize(), theme.Colors.PrimaryTextColor))
+				signInRadioButton = new RadioButton(new RadioButtonViewText("Sign in to access your existing printers".Localize(), theme.TextColor))
 				{
 					HAnchor = HAnchor.Left,
 					Margin = commonMargin.Clone(bottom: 10),
@@ -135,7 +135,7 @@ namespace MatterHackers.MatterControl.PrinterControls.PrinterConnections
 				};
 				contentRow.AddChild(signInRadioButton);
 
-				createPrinterRadioButton = new RadioButton(new RadioButtonViewText("Create a new printer", theme.Colors.PrimaryTextColor))
+				createPrinterRadioButton = new RadioButton(new RadioButtonViewText("Create a new printer", theme.TextColor))
 				{
 					HAnchor = HAnchor.Left,
 					Margin = commonMargin,
@@ -163,7 +163,7 @@ namespace MatterHackers.MatterControl.PrinterControls.PrinterConnections
 					var authContext = new AuthenticationContext();
 					authContext.SignInComplete += (s2, e2) =>
 					{
-						this.DialogWindow.ChangeToPage(new SelectPrinterPage("Finish".Localize()));
+						this.DialogWindow.ChangeToPage(new OpenPrinterPage("Finish".Localize()));
 					};
 
 					this.DialogWindow.ChangeToPage(ApplicationController.GetAuthPage(authContext));
@@ -173,7 +173,7 @@ namespace MatterHackers.MatterControl.PrinterControls.PrinterConnections
 					bool controlsValid = this.ValidateControls();
 					if (controlsValid)
 					{
-						var printer = await ProfileManager.CreateProfileAsync(activeMake, activeModel, activeName);
+						var printer = await ProfileManager.CreatePrinterAsync(activeMake, activeModel, activeName);
 						if (printer == null)
 						{
 							this.printerNameError.Text = "Error creating profile".Localize();
@@ -184,7 +184,7 @@ namespace MatterHackers.MatterControl.PrinterControls.PrinterConnections
 						this.LoadCalibrationPrints();
 
 #if __ANDROID__
-						UiThread.RunOnIdle(() => DialogWindow.ChangeToPage<AndroidConnectDevicePage>());
+						UiThread.RunOnIdle(() => DialogWindow.ChangeToPage(new AndroidConnectDevicePage(printer)));
 #else
 						UiThread.RunOnIdle(() =>
 						{
@@ -218,7 +218,7 @@ namespace MatterHackers.MatterControl.PrinterControls.PrinterConnections
 		{
 			TextWidget printerNameLabel = new TextWidget("Name".Localize() + ":", 0, 0, 12)
 			{
-				TextColor = theme.Colors.PrimaryTextColor,
+				TextColor = theme.TextColor,
 				HAnchor = HAnchor.Stretch,
 				Margin = new BorderDouble(0, 4, 0, 1)
 			};
@@ -231,7 +231,7 @@ namespace MatterHackers.MatterControl.PrinterControls.PrinterConnections
 
 			printerNameError = new TextWidget("", 0, 0, 10)
 			{
-				TextColor = theme.Colors.PrimaryTextColor,
+				TextColor = theme.TextColor,
 				HAnchor = HAnchor.Stretch,
 				Margin = new BorderDouble(top: 3)
 			};
@@ -252,7 +252,7 @@ namespace MatterHackers.MatterControl.PrinterControls.PrinterConnections
 		{
 			var sectionLabel = new TextWidget(labelText, 0, 0, 12)
 			{
-				TextColor = theme.Colors.PrimaryTextColor,
+				TextColor = theme.TextColor,
 				HAnchor = HAnchor.Stretch,
 				Margin = elementMargin
 			};

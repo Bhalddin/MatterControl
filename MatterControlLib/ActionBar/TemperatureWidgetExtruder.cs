@@ -1,5 +1,5 @@
 ﻿/*
-Copyright (c) 2017, Kevin Pope, John Lewin
+Copyright (c) 2018, Kevin Pope, John Lewin
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -29,13 +29,12 @@ either expressed or implied, of the FreeBSD Project.
 
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using MatterHackers.Agg;
-using MatterHackers.Agg.Platform;
 using MatterHackers.Agg.UI;
 using MatterHackers.Localizations;
 using MatterHackers.MatterControl.ConfigurationPage;
+using MatterHackers.MatterControl.ConfigurationPage.PrintLeveling;
 using MatterHackers.MatterControl.CustomWidgets;
 using MatterHackers.MatterControl.PrinterCommunication;
 using MatterHackers.MatterControl.SlicerConfiguration;
@@ -53,46 +52,40 @@ namespace MatterHackers.MatterControl.ActionBar
 			this.HAnchor = HAnchor.Stretch;
 			this.printer = printer;
 
-			GuiWidget macroButtons = null;
+			GuiWidget loadUnloadButtons = null;
 			// We do not yet support loading filament into extruders other than 0, fix it when time.
 			if (extruderIndex == 0)
 			{
 				// add in load and unload buttons
-				macroButtons = new FlowLayoutWidget()
+				loadUnloadButtons = new FlowLayoutWidget()
 				{
 					Padding = theme.ToolbarPadding,
 				};
 
-				var loadFilament = new GCodeMacro()
-				{
-					GCode = AggContext.StaticData.ReadAllText(Path.Combine("SliceSettings", "load_filament.txt"))
-				};
-
-				var loadButton = new TextButton("Load".Localize(), theme)
-				{
-					BackgroundColor = theme.SlightShade,
-					Margin = theme.ButtonSpacing,
-					ToolTipText = "Load filament".Localize()
-				};
+				var loadButton = theme.CreateDialogButton("Load".Localize());
+				loadButton.ToolTipText = "Load filament".Localize();
 				loadButton.Name = "Load Filament Button";
-				loadButton.Click += (s, e) => loadFilament.Run(printer.Connection);
-				macroButtons.AddChild(loadButton);
-
-				var unloadFilament = new GCodeMacro()
+				loadButton.Click += (s, e) =>
 				{
-					GCode = AggContext.StaticData.ReadAllText(Path.Combine("SliceSettings", "unload_filament.txt"))
+					UiThread.RunOnIdle(() =>
+					{
+						LoadFilamentWizard.Start(printer, theme, true);
+					});
 				};
+				loadUnloadButtons.AddChild(loadButton);
 
-				var unloadButton = new TextButton("Unload".Localize(), theme)
+				var unloadButton = theme.CreateDialogButton("Unload".Localize());
+				unloadButton.ToolTipText = "Unload filament".Localize();
+				unloadButton.Click += (s, e) =>
 				{
-					BackgroundColor = theme.SlightShade,
-					Margin = theme.ButtonSpacing,
-					ToolTipText = "Unload filament".Localize()
+					UiThread.RunOnIdle(() =>
+					{
+						UnloadFilamentWizard.Start(printer, theme, true);
+					});
 				};
-				unloadButton.Click += (s, e) => unloadFilament.Run(printer.Connection);
-				macroButtons.AddChild(unloadButton);
+				loadUnloadButtons.AddChild(unloadButton);
 
-				this.AddChild(new SettingsItem("Filament".Localize(), macroButtons, theme, enforceGutter: false));
+				this.AddChild(new SettingsItem("Filament".Localize(), loadUnloadButtons, theme, enforceGutter: false));
 			}
 
 			// Add the Extrude buttons
@@ -103,35 +96,27 @@ namespace MatterHackers.MatterControl.ActionBar
 				Padding = theme.ToolbarPadding,
 			};
 
-			var retractButton = new TextButton("Retract".Localize(), theme)
-			{
-				BackgroundColor = theme.SlightShade,
-				Margin = theme.ButtonSpacing,
-				ToolTipText = "Retract filament".Localize()
-			};
-			retractButton.Click += (s, e) =>
-			{
-				printer.Connection.MoveExtruderRelative(moveAmount * -1, printer.Settings.EFeedRate(extruderIndex), extruderIndex);
-			};
-			buttonContainer.AddChild(retractButton);
+			int extruderButtonTopMargin = loadUnloadButtons == null ? 8 : 0;
 
-			int extruderButtonTopMargin = macroButtons == null ? 8 : 0;
-
-			var extrudeButton = new TextButton("Extrude".Localize(), theme)
-			{
-				BackgroundColor = theme.SlightShade,
-				Margin = theme.ButtonSpacing,
-				Name = "Extrude Button",
-				ToolTipText = "Extrude filament".Localize()
-			};
+			var extrudeButton = theme.CreateDialogButton("Extrude".Localize());
+			extrudeButton.Name = "Extrude Button";
+			extrudeButton.ToolTipText = "Extrude filament".Localize();
 			extrudeButton.Click += (s, e) =>
 			{
 				printer.Connection.MoveExtruderRelative(moveAmount, printer.Settings.EFeedRate(extruderIndex), extruderIndex);
 			};
 			buttonContainer.AddChild(extrudeButton);
 
+			var retractButton = theme.CreateDialogButton("Retract".Localize());
+			retractButton.ToolTipText = "Retract filament".Localize();
+			retractButton.Click += (s, e) =>
+			{
+				printer.Connection.MoveExtruderRelative(moveAmount * -1, printer.Settings.EFeedRate(extruderIndex), extruderIndex);
+			};
+			buttonContainer.AddChild(retractButton);
+
 			this.AddChild(new SettingsItem(
-				macroButtons == null ? "Filament".Localize() : "", // Don't put the name if we put in a macro button (it has the name)
+				loadUnloadButtons == null ? "Filament".Localize() : "", // Don't put the name if we put in a load and unload button (it has the name)
 				buttonContainer,
 				theme,
 				enforceGutter: false));
@@ -186,7 +171,7 @@ namespace MatterHackers.MatterControl.ActionBar
 					break;
 			}
 
-			moveButtonsContainer.AddChild(new TextWidget("mm", textColor: theme.Colors.PrimaryTextColor, pointSize: 8)
+			moveButtonsContainer.AddChild(new TextWidget("mm", textColor: theme.TextColor, pointSize: 8)
 			{
 				VAnchor = VAnchor.Center,
 				Margin = new BorderDouble(3, 0)
@@ -203,6 +188,7 @@ namespace MatterHackers.MatterControl.ActionBar
 		private string sliceSettingsNote = "Note: Slice Settings are applied before the print actually starts. Changes while printing will not effect the active print.".Localize();
 		private string waitingForExtruderToHeatMessage = "The extruder is currently heating and its target temperature cannot be changed until it reaches {0}°C.\n\nYou can set the starting extruder temperature in 'Slice Settings' -> 'Filament'.\n\n{1}".Localize();
 		private Dictionary<string, UIField> allUiFields = new Dictionary<string, UIField>();
+		private RunningInterval runningInterval;
 
 		public TemperatureWidgetHotend(PrinterConfig printer, int hotendIndex, ThemeConfig theme)
 			: base(printer, "150.3°", theme)
@@ -214,7 +200,8 @@ namespace MatterHackers.MatterControl.ActionBar
 
 			this.PopupContent = this.GetPopupContent(ApplicationController.Instance.MenuTheme);
 
-			printer.Connection.HotendTemperatureRead.RegisterEvent((s, e) => DisplayCurrentTemperature(), ref unregisterEvents);
+			// Register listeners
+			printer.Connection.HotendTemperatureRead += Connection_HotendTemperatureRead;
 		}
 
 		protected override int ActualTemperature => (int)printer.Connection.GetActualHotendTemperature(this.hotendIndex);
@@ -233,7 +220,7 @@ namespace MatterHackers.MatterControl.ActionBar
 				HAnchor = HAnchor.Absolute,
 				VAnchor = VAnchor.Fit,
 				Padding = new BorderDouble(12, 0),
-				BackgroundColor = menuTheme.ActiveTabColor
+				BackgroundColor = menuTheme.BackgroundColor
 			};
 
 			var container = new FlowLayoutWidget(FlowDirection.TopToBottom)
@@ -275,7 +262,6 @@ namespace MatterHackers.MatterControl.ActionBar
 			var settingsContext = new SettingsContext(printer, null, NamedSettingsLayers.All);
 			var settingsData = SettingsOrganizer.Instance.GetSettingsData(TemperatureKey);
 			var temperatureRow = SliceSettingsTabView.CreateItemRow(settingsData, settingsContext, printer, menuTheme, ref tabIndex, allUiFields);
-			SliceSettingsRow.AddBordersToEditFields(temperatureRow);
 			container.AddChild(temperatureRow);
 
 			// Add the temperature row to the always enabled list ensuring the field can be set when disconnected
@@ -293,17 +279,18 @@ namespace MatterHackers.MatterControl.ActionBar
 				Width = widget.Width - 20,
 				Height = 35, // this works better if it is a common multiple of the Width
 			};
-			var runningInterval = UiThread.SetInterval(() =>
+
+			runningInterval = UiThread.SetInterval(() =>
 			{
 				graph.AddData(this.ActualTemperature);
 			}, 1);
-			this.Closed += (s, e) => runningInterval.Continue = false;
-
+			
 			var valueField = temperatureRow.Descendants<MHNumberEdit>().FirstOrDefault();
 			valueField.Name = "Temperature Input";
 
 			var settingsRow = temperatureRow.DescendantsAndSelf<SliceSettingsRow>().FirstOrDefault();
-			PrinterSettings.SettingChanged.RegisterEvent((s, e) =>
+
+			void Printer_SettingChanged(object s, EventArgs e)
 			{
 				if (e is StringEventArgs stringEvent)
 				{
@@ -325,7 +312,7 @@ namespace MatterHackers.MatterControl.ActionBar
 
 						graph.GoalValue = temp;
 
-						// TODO: Why is this only when enabled? How does it get set to 
+						// TODO: Why is this only when enabled?
 						if (heatToggle.Checked)
 						{
 							// TODO: Why is a UI widget who is listening to model events driving this behavior? What when it's not loaded?
@@ -334,8 +321,11 @@ namespace MatterHackers.MatterControl.ActionBar
 
 						settingsRow.UpdateStyle();
 					}
-				};
-			}, ref unregisterEvents);
+				}
+			}
+
+			printer.Settings.SettingChanged += Printer_SettingChanged;
+			printer.Disposed += (s, e) => printer.Settings.SettingChanged -= Printer_SettingChanged;
 
 			container.AddChild(graph);
 
@@ -357,7 +347,7 @@ namespace MatterHackers.MatterControl.ActionBar
 				if (pulldownContainer != null)
 				{
 					pulldownContainer.Padding = menuTheme.ToolbarPadding;
-					pulldownContainer.HAnchor = HAnchor.Fit;
+					pulldownContainer.HAnchor = HAnchor.MaxFitOrStretch;
 					pulldownContainer.Margin = 0;
 					pulldownContainer.Padding = 0;
 				}
@@ -368,7 +358,7 @@ namespace MatterHackers.MatterControl.ActionBar
 				if (dropList != null)
 				{
 					dropList.Name = "Hotend Preset Selector";
-					dropList.HAnchor = HAnchor.Fit;
+					dropList.HAnchor = HAnchor.Stretch;
 					dropList.Margin = 0;
 				}
 
@@ -377,6 +367,8 @@ namespace MatterHackers.MatterControl.ActionBar
 					{
 						Border = new BorderDouble(0, 1)
 					});
+
+				presetsSelector.PerformLayout();
 			}
 			else // put in a temperature selector for the correct material
 			{
@@ -401,7 +393,11 @@ namespace MatterHackers.MatterControl.ActionBar
 						TextColor = Color.Black,
 						HAnchor = HAnchor.Left,
 					});
-					container.AddChild(new ControlContentExtruder(printer, extruderIndex, menuTheme));
+					container.AddChild(new ControlContentExtruder(printer, extruderIndex, menuTheme)
+					{
+						Border = new BorderDouble(top: 1),
+						BorderColor = AppContext.MenuTheme.MinimalShade
+					});
 				}
 			}
 			else
@@ -422,6 +418,15 @@ namespace MatterHackers.MatterControl.ActionBar
 			base.OnDraw(graphics2D);
 		}
 
+		public override void OnClosed(EventArgs e)
+		{
+			// Unregister listeners
+			printer.Connection.HotendTemperatureRead -= Connection_HotendTemperatureRead;
+			UiThread.ClearInterval(runningInterval);
+
+			base.OnClosed(e);
+		}
+
 		protected override void SetTargetTemperature(double targetTemp)
 		{
 			double goalTemp = (int)(targetTemp + .5);
@@ -436,6 +441,11 @@ namespace MatterHackers.MatterControl.ActionBar
 			{
 				printer.Connection.SetTargetHotendTemperature(hotendIndex, (int)(targetTemp + .5));
 			}
+		}
+
+		private void Connection_HotendTemperatureRead(object s, EventArgs e)
+		{
+			DisplayCurrentTemperature();
 		}
 	}
 }

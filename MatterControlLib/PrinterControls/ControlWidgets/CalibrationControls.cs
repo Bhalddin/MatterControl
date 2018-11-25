@@ -32,6 +32,7 @@ using MatterHackers.Agg;
 using MatterHackers.Agg.Platform;
 using MatterHackers.Agg.UI;
 using MatterHackers.Localizations;
+using MatterHackers.MatterControl.ConfigurationPage.PrintLeveling;
 using MatterHackers.MatterControl.CustomWidgets;
 using MatterHackers.MatterControl.PrinterCommunication;
 using MatterHackers.MatterControl.SlicerConfiguration;
@@ -40,9 +41,8 @@ namespace MatterHackers.MatterControl.PrinterControls
 {
 	public class CalibrationControls : FlowLayoutWidget
 	{
-		private EventHandler unregisterEvents;
-
 		private PrinterConfig printer;
+		private RoundedToggleSwitch printLevelingSwitch;
 
 		private CalibrationControls(PrinterConfig printer, ThemeConfig theme)
 			: base(FlowDirection.TopToBottom)
@@ -72,7 +72,7 @@ namespace MatterHackers.MatterControl.PrinterControls
 				{
 					UiThread.RunOnIdle(() =>
 					{
-						LevelingWizard.ShowPrintLevelWizard(printer, theme);
+						PrintLevelingWizard.Start(printer, theme);
 					});
 				};
 				settingsRow.AddChild(runWizardButton);
@@ -81,7 +81,7 @@ namespace MatterHackers.MatterControl.PrinterControls
 				if (!printer.Settings.GetValue<bool>(SettingsKey.print_leveling_required_to_print))
 				{
 					// put in the switch
-					var printLevelingSwitch = new RoundedToggleSwitch(theme)
+					printLevelingSwitch = new RoundedToggleSwitch(theme)
 					{
 						VAnchor = VAnchor.Center,
 						Margin = new BorderDouble(left: 16),
@@ -92,17 +92,10 @@ namespace MatterHackers.MatterControl.PrinterControls
 						printer.Settings.Helpers.DoPrintLeveling(printLevelingSwitch.Checked);
 					};
 
-					void Settings_PrintLevelingEnabledChanged(object sender, EventArgs e)
-					{
-						printLevelingSwitch.Checked = printer.Settings.GetValue<bool>(SettingsKey.print_leveling_enabled);
-					}
-
+					// TODO: Why is this listener conditional? If the leveling changes somehow, shouldn't we be updated the UI to reflect that?
+					// Register listeners
 					printer.Settings.PrintLevelingEnabledChanged += Settings_PrintLevelingEnabledChanged;
-					this.Closed += (s,e) =>
-					{
-						printer.Settings.PrintLevelingEnabledChanged -= Settings_PrintLevelingEnabledChanged;
-					};
-
+					
 					settingsRow.AddChild(printLevelingSwitch);
 				}
 
@@ -126,7 +119,7 @@ namespace MatterHackers.MatterControl.PrinterControls
 					{
 						UiThread.RunOnIdle(() =>
 						{
-							LevelingWizard.ShowProbeCalibrationWizard(printer, theme);
+							ProbeCalibrationWizard.Start(printer, theme);
 						});
 					};
 
@@ -135,8 +128,9 @@ namespace MatterHackers.MatterControl.PrinterControls
 				}
 			}
 
-			printer.Connection.CommunicationStateChanged.RegisterEvent(PrinterStatusChanged, ref unregisterEvents);
-			printer.Connection.EnableChanged.RegisterEvent(PrinterStatusChanged, ref unregisterEvents);
+			// Register listeners
+			printer.Connection.CommunicationStateChanged += PrinterStatusChanged;
+			printer.Connection.EnableChanged += PrinterStatusChanged;
 
 			SetVisibleControls();
 		}
@@ -160,8 +154,17 @@ namespace MatterHackers.MatterControl.PrinterControls
 
 		public override void OnClosed(EventArgs e)
 		{
-			unregisterEvents?.Invoke(this, null);
+			// Unregister listeners
+			printer.Settings.PrintLevelingEnabledChanged -= Settings_PrintLevelingEnabledChanged;
+			printer.Connection.CommunicationStateChanged -= PrinterStatusChanged;
+			printer.Connection.EnableChanged -= PrinterStatusChanged;
+
 			base.OnClosed(e);
+		}
+
+		private void Settings_PrintLevelingEnabledChanged(object sender, EventArgs e)
+		{
+			printLevelingSwitch.Checked = printer.Settings.GetValue<bool>(SettingsKey.print_leveling_enabled);
 		}
 
 		private void PrinterStatusChanged(object sender, EventArgs e)

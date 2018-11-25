@@ -40,8 +40,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 	{
 		private PrinterConfig printer;
 		private PrinterTabPage printerTabPage;
-		private EventHandler unregisterEvents;
-		private bool activelySlicing { get; set; }
+		private bool activelySlicing;
 
 		public SliceButton(PrinterConfig printer, PrinterTabPage printerTabPage, ThemeConfig theme)
 			: base("Slice".Localize(), theme)
@@ -53,10 +52,8 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 			this.HoverColor = theme.ToolbarButtonHover;
 			this.MouseDownColor = theme.ToolbarButtonDown;
 
-			printer.Connection.CommunicationStateChanged.RegisterEvent((s, e) =>
-			{
-				UiThread.RunOnIdle(SetButtonStates);
-			}, ref unregisterEvents);
+			// Register listeners
+			printer.Connection.CommunicationStateChanged += Connection_CommunicationStateChanged;
 
 			SetButtonStates();
 		}
@@ -69,8 +66,15 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 
 		public override void OnClosed(EventArgs e)
 		{
-			unregisterEvents?.Invoke(this, null);
+			// Unregister listeners
+			printer.Connection.CommunicationStateChanged -= Connection_CommunicationStateChanged;
+
 			base.OnClosed(e);
+		}
+
+		private void Connection_CommunicationStateChanged(object s, EventArgs e)
+		{
+			UiThread.RunOnIdle(SetButtonStates);
 		}
 
 		private void SetButtonStates()
@@ -95,7 +99,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 			if (printer.Settings.PrinterSelected)
 			{
 				if (!activelySlicing
-					&& printer.Settings.IsValid()
+					&& SettingsValidation.SettingsValid(printer)
 					&& printer.Bed.EditContext.SourceItem != null)
 				{
 					activelySlicing = true;
@@ -103,18 +107,12 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 
 					try
 					{
-						// Switch to the 3D layer view if on Model view
-						if (printer.ViewState.ViewMode == PartViewMode.Model)
-						{
-							printer.ViewState.ViewMode = PartViewMode.Layers3D;
-						}
-
 						await ApplicationController.Instance.Tasks.Execute("Saving".Localize(), printer.Bed.SaveChanges);
 
 						await ApplicationController.Instance.SliceItemLoadOutput(
 							printer,
 							printer.Bed.Scene,
-							printer.Bed.EditContext.GCodeFilePath);
+							printer.Bed.EditContext.GCodeFilePath(printer));
 					}
 					catch (Exception ex)
 					{

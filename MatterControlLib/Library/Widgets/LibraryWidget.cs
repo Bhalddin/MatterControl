@@ -41,6 +41,7 @@ using MatterHackers.MatterControl.CustomWidgets;
 using MatterHackers.MatterControl.Library;
 using MatterHackers.MatterControl.PartPreviewWindow;
 using MatterHackers.MatterControl.PrinterCommunication;
+using MatterHackers.MatterControl.PrinterControls.PrinterConnections;
 using MatterHackers.MatterControl.PrintQueue;
 using static MatterHackers.MatterControl.PrintLibrary.PrintLibraryWidget;
 
@@ -59,28 +60,31 @@ namespace MatterHackers.MatterControl.PrintLibrary
 		private GuiWidget searchInput;
 		private ILibraryContainer searchContainer;
 
-		private PartPreviewContent partPreviewContent;
+		private MainViewWidget mainViewWidget;
 		private ThemeConfig theme;
 		private OverflowBar navBar;
 		private GuiWidget searchButton;
-		private TreeView treeView;
+		private TreeView libraryTreeView;
 
-		public LibraryWidget(PartPreviewContent partPreviewContent, ThemeConfig theme)
+		public LibraryWidget(MainViewWidget mainViewWidget, ThemeConfig theme)
 		{
 			this.theme = theme;
-			this.partPreviewContent = partPreviewContent;
+			this.mainViewWidget = mainViewWidget;
 			this.Padding = 0;
 			this.AnchorAll();
 
 			var allControls = new FlowLayoutWidget(FlowDirection.TopToBottom);
 
-			libraryView = new LibraryListView(ApplicationController.Instance.Library, theme)
+			var libraryContext = ApplicationController.Instance.Library;
+
+			libraryView = new LibraryListView(libraryContext, theme)
 			{
 				Name = "LibraryView",
 				// Drop containers if ShowContainers != 1
 				ContainerFilter = (container) => UserSettings.Instance.ShowContainers,
-				BackgroundColor = theme.ActiveTabColor,
-				Border = new BorderDouble(top: 1)
+				BackgroundColor = theme.BackgroundColor,
+				Border = new BorderDouble(top: 1),
+				DoubleClickAction = LibraryListView.DoubleClickActions.PreviewItem
 			};
 
 			libraryView.SelectedItems.CollectionChanged += SelectedItems_CollectionChanged;
@@ -95,7 +99,7 @@ namespace MatterHackers.MatterControl.PrintLibrary
 			allControls.AddChild(navBar);
 			theme.ApplyBottomBorder(navBar);
 
-			breadCrumbWidget = new FolderBreadCrumbWidget(libraryView, theme);
+			breadCrumbWidget = new FolderBreadCrumbWidget(libraryContext, theme);
 			navBar.AddChild(breadCrumbWidget);
 
 			var searchPanel = new SearchInputBox(theme)
@@ -303,15 +307,15 @@ namespace MatterHackers.MatterControl.PrintLibrary
 
 			allControls.AddChild(horizontalSplitter);
 
-			treeView = new TreeView(theme)
+			libraryTreeView = new TreeView(theme)
 			{
 				HAnchor = HAnchor.Stretch,
 				VAnchor = VAnchor.Stretch,
 				Margin = 5
 			};
-			treeView.AfterSelect += async (s, e) =>
+			libraryTreeView.AfterSelect += async (s, e) =>
 			{
-				if (treeView.SelectedNode is ContainerTreeNode treeNode)
+				if (libraryTreeView.SelectedNode is ContainerTreeNode treeNode)
 				{
 					if (!treeNode.ContainerAcquired)
 					{
@@ -324,7 +328,7 @@ namespace MatterHackers.MatterControl.PrintLibrary
 					}
 				}
 			};
-			horizontalSplitter.Panel1.AddChild(treeView);
+			horizontalSplitter.Panel1.AddChild(libraryTreeView);
 
 			var rootColumn = new FlowLayoutWidget(FlowDirection.TopToBottom)
 			{
@@ -332,18 +336,25 @@ namespace MatterHackers.MatterControl.PrintLibrary
 				VAnchor = VAnchor.Fit,
 				Margin = new BorderDouble(left: 10)
 			};
-			treeView.AddChild(rootColumn);
+			libraryTreeView.AddChild(rootColumn);
 
-			UiThread.RunOnIdle(() =>
+			if (AppContext.IsLoading)
 			{
-				foreach (var item in ApplicationController.Instance.Library.RootLibaryContainer.ChildContainers)
+				ApplicationController.StartupActions.Add(new ApplicationController.StartupAction()
 				{
-					var rootNode = this.CreateTreeNode(item);
-					rootNode.TreeView = treeView;
+					Title = "Initializing Library".Localize(),
+					Priority = 0,
+					Action = () =>
+					{
+						this.LoadRootLibraryNodes(rootColumn);
+					}
+				});
+			}
+			else
+			{
+				this.LoadRootLibraryNodes(rootColumn);
+			}
 
-					rootColumn.AddChild(rootNode);
-				}
-			}, 1);
 			horizontalSplitter.Panel2.AddChild(libraryView);
 
 			buttonPanel = new FlowLayoutWidget()
@@ -359,16 +370,26 @@ namespace MatterHackers.MatterControl.PrintLibrary
 			this.AddChild(allControls);
 		}
 
+		private void LoadRootLibraryNodes(FlowLayoutWidget rootColumn)
+		{
+			var rootLibraryContainer = ApplicationController.Instance.Library.RootLibaryContainer;
+
+			foreach (var libraryContainerLink in rootLibraryContainer.ChildContainers)
+			{
+				if (libraryContainerLink.IsVisible)
+				{
+					var rootNode = this.CreateTreeNode(libraryContainerLink, rootLibraryContainer);
+					rootNode.TreeView = libraryTreeView;
+
+					rootColumn.AddChild(rootNode);
+				}
+			}
+		}
+
 		private async Task GetExpansionItems(ILibraryItem containerItem, ContainerTreeNode treeNode)
 		{
 			if (containerItem is ILibraryContainerLink containerLink)
 			{
-				// Prevent invalid assignment of container.Parent due to overlapping load attempts that
-				// would otherwise result in containers with self referencing parent properties
-				//if (loadingContainerLink != containerLink)
-				//{
-				//	loadingContainerLink = containerLink;
-
 				try
 				{
 					// Container items
@@ -380,14 +401,14 @@ namespace MatterHackers.MatterControl.PrintLibrary
 							container.Load();
 						});
 
-						if (treeNode.NodeParent is ContainerTreeNode parentNode)
+						if (treeNode is ContainerTreeNode containerNode)
 						{
-							container.Parent = parentNode.Container;
+							container.Parent = containerNode.ParentContainer;
 						}
 
 						foreach (var childContainer in container.ChildContainers)
 						{
-							treeNode.Nodes.Add(CreateTreeNode(childContainer));
+							treeNode.Nodes.Add(CreateTreeNode(childContainer, container));
 						}
 
 						treeNode.Container = container;
@@ -397,23 +418,15 @@ namespace MatterHackers.MatterControl.PrintLibrary
 						treeNode.Expanded = treeNode.Nodes.Count > 0;
 
 						treeNode.Invalidate();
-
-						//	container.Parent = ActiveContainer;
-						// SetActiveContainer(container);
 					}
 				}
 				catch { }
-				finally
-				{
-					// Clear the loading guard and any completed load attempt
-					// loadingContainerLink = null;
-				}
 			}
 		}
 
-		private TreeNode CreateTreeNode(ILibraryItem containerItem)
+		private TreeNode CreateTreeNode(ILibraryItem containerItem, ILibraryContainer parentContainer)
 		{
-			var treeNode = new ContainerTreeNode(theme)
+			var treeNode = new ContainerTreeNode(theme, parentContainer)
 			{
 				Text = containerItem.Name,
 				Tag = containerItem,
@@ -513,10 +526,10 @@ namespace MatterHackers.MatterControl.PrintLibrary
 
 			bool containerSupportsEdits = activeContainer is ILibraryWritableContainer;
 
-			var owningNode = treeView.SelectedNode?.Parents<ContainerTreeNode>().Where(p => p.Container == activeContainer).FirstOrDefault();
+			var owningNode = libraryTreeView.SelectedNode?.Parents<ContainerTreeNode>().Where(p => p.Container == activeContainer).FirstOrDefault();
 			if (owningNode != null)
 			{
-				treeView.SelectedNode = owningNode;
+				libraryTreeView.SelectedNode = owningNode;
 			}
 
 			searchInput.Text = activeContainer.KeywordFilter;
@@ -568,7 +581,7 @@ namespace MatterHackers.MatterControl.PrintLibrary
 			providerMessageContainer.AddChild(providerMessageWidget);
 		}
 
-		public static void CreateMenuActions(LibraryListView libraryView, List<LibraryAction> menuActions, PartPreviewContent partPreviewContent, ThemeConfig theme, bool allowPrint)
+		public static void CreateMenuActions(LibraryListView libraryView, List<LibraryAction> menuActions, MainViewWidget mainViewWidget, ThemeConfig theme, bool allowPrint)
 		{
 			menuActions.Add(new LibraryAction(ActionScope.ListView)
 			{
@@ -639,7 +652,7 @@ namespace MatterHackers.MatterControl.PrintLibrary
 					{
 						// TODO: Sort out the right way to have an ActivePrinter context that looks and behaves correctly
 						var activeContext = ApplicationController.Instance.DragDropData;
-						var printer = activeContext.Printer;
+						var printer = activeContext.View3DWidget.Printer;
 
 						switch (selectedLibraryItems.FirstOrDefault())
 						{
@@ -673,7 +686,7 @@ namespace MatterHackers.MatterControl.PrintLibrary
 					},
 					IsEnabled = (selectedListItems, listView) =>
 					{
-						var communicationState = ApplicationController.Instance.DragDropData?.Printer?.Connection.CommunicationState;
+						var communicationState = ApplicationController.Instance.DragDropData?.View3DWidget?.Printer?.Connection.CommunicationState;
 
 						// Singleselect - disallow containers
 						return listView.SelectedItems.Count == 1
@@ -692,11 +705,7 @@ namespace MatterHackers.MatterControl.PrintLibrary
 				Icon = AggContext.StaticData.LoadIcon("cube.png", 16, 16, theme.InvertIcons),
 				Action = (selectedLibraryItems, listView) =>
 				{
-					ApplicationController.Instance.AppView.CreatePartTab().ContinueWith(task =>
-					{
-						var workspace = ApplicationController.Instance.Workspaces.Last();
-						workspace.SceneContext.AddToPlate(selectedLibraryItems);
-					});
+					ApplicationController.Instance.OpenIntoNewTab(selectedLibraryItems);
 				},
 				IsEnabled = (selectedListItems, listView) =>
 				{
@@ -714,7 +723,7 @@ namespace MatterHackers.MatterControl.PrintLibrary
 				Action = (selectedLibraryItems, listView) =>
 				{
 					var activeContext = ApplicationController.Instance.DragDropData;
-					var printer = activeContext.Printer;
+					var printer = activeContext.View3DWidget.Printer;
 
 					if (listView.SelectedItems.Count == 1 &&
 						selectedLibraryItems.FirstOrDefault() is ILibraryAssetStream assetStream
@@ -735,7 +744,7 @@ namespace MatterHackers.MatterControl.PrintLibrary
 					}
 
 					ApplicationController.Instance.BlinkTab(
-						ApplicationController.Instance.AppView.TabControl.AllTabs.FirstOrDefault(t => t.TabContent is PrinterTabPage));
+						ApplicationController.Instance.MainView.TabControl.AllTabs.FirstOrDefault(t => t.TabContent is PrinterTabPage));
 				},
 				IsEnabled = (selectedListItems, listView) =>
 				{
@@ -763,7 +772,8 @@ namespace MatterHackers.MatterControl.PrintLibrary
 
 						ApplicationController.Instance.Workspaces.Add(workspace);
 
-						partPreviewContent.CreatePartTab(workspace);
+						var tab = mainViewWidget.CreatePartTab(workspace);
+						mainViewWidget.TabControl.ActiveTab = tab;
 
 						// Load content after UI widgets to support progress notification during acquire/load
 						await workspace.SceneContext.LoadContent(
@@ -923,11 +933,7 @@ namespace MatterHackers.MatterControl.PrintLibrary
 				Icon = AggContext.StaticData.LoadIcon("cube_export.png", 16, 16, theme.InvertIcons),
 				Action = (selectedLibraryItems, listView) =>
 				{
-					// Previously - exportButton_Click(object sender, EventArgs e)
-					// Open export options
-					var exportPage = new ExportPrintItemPage(libraryView.SelectedItems.Select(item => item.Model), true);
-
-					DialogWindow.Show(exportPage);
+					ApplicationController.Instance.ExportLibraryItems(libraryView.SelectedItems.Select(item => item.Model));
 				},
 				IsEnabled = (selectedListItems, listView) =>
 				{
@@ -990,7 +996,7 @@ namespace MatterHackers.MatterControl.PrintLibrary
 											var feedbackWindow = new SavePartsSheetFeedbackWindow(
 												printItems.Count(),
 												printItems.FirstOrDefault()?.Name,
-												theme.ActiveTabColor);
+												theme.BackgroundColor);
 
 											var currentPartsInQueue = new PartsSheet(printItems, saveParams.FileName);
 											currentPartsInQueue.UpdateRemainingItems += feedbackWindow.StartingNextPart;
@@ -1050,6 +1056,8 @@ namespace MatterHackers.MatterControl.PrintLibrary
 				ApplicationController.Instance.Library.ContainerChanged -= Library_ContainerChanged;
 			}
 
+			mainViewWidget = null;
+
 			base.OnClosed(e);
 		}
 
@@ -1087,7 +1095,7 @@ namespace MatterHackers.MatterControl.PrintLibrary
 		public override void OnLoad(EventArgs args)
 		{
 			// Defer creating menu items until plugins have loaded
-			LibraryWidget.CreateMenuActions(libraryView, menuActions, partPreviewContent, theme, allowPrint: false);
+			LibraryWidget.CreateMenuActions(libraryView, menuActions, mainViewWidget, theme, allowPrint: false);
 
 			navBar.OverflowButton.Name = "Print Library Overflow Menu";
 			navBar.ExtendOverflowMenu = (popupMenu) =>

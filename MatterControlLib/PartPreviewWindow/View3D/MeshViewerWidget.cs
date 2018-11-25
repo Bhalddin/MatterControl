@@ -37,6 +37,7 @@ using MatterHackers.Agg;
 using MatterHackers.Agg.Image;
 using MatterHackers.Agg.UI;
 using MatterHackers.DataConverters3D;
+using MatterHackers.Localizations;
 using MatterHackers.MatterControl;
 using MatterHackers.MatterControl.DesignTools.EditableTypes;
 using MatterHackers.MatterControl.DesignTools.Operations;
@@ -50,8 +51,6 @@ using static MatterHackers.Agg.Easing;
 
 namespace MatterHackers.MeshVisualizer
 {
-	public enum BedShape { Rectangular, Circular };
-
 	public class DrawGlContentEventArgs : DrawEventArgs
 	{
 		public bool ZBuffered { get; }
@@ -231,67 +230,6 @@ namespace MatterHackers.MeshVisualizer
 		{
 			return (materialIndex == -1) ? unassignedColor : ColorF.FromHSL(materialIndex / 10.0, .99, .49).ToColor();
 		}
-
-		public static bool InsideBuildVolume(this PrinterConfig printerConfig,  IObject3D item)
-		{
-			if(item.Mesh == null)
-			{
-				return true;
-			}
-
-			var worldMatrix = item.WorldMatrix();
-			// probably need , true (require precision)
-			var aabb = item.Mesh.GetAxisAlignedBoundingBox(worldMatrix);
-
-			var bed = printerConfig.Bed;
-
-			if (bed.BuildHeight > 0
-					&& aabb.maxXYZ.Z >= bed.BuildHeight
-				|| aabb.maxXYZ.Z <= 0)
-			{
-				// object completely below the bed or any part above the build volume
-				return false;
-			}
-
-			switch(bed.BedShape)
-			{
-				case BedShape.Rectangular:
-					if(aabb.minXYZ.X < bed.BedCenter.X - bed.ViewerVolume.X/2
-						|| aabb.maxXYZ.X > bed.BedCenter.X + bed.ViewerVolume.X / 2
-						|| aabb.minXYZ.Y < bed.BedCenter.Y - bed.ViewerVolume.Y / 2
-						|| aabb.maxXYZ.Y > bed.BedCenter.Y + bed.ViewerVolume.Y / 2)
-					{
-						return false;
-					}
-					break;
-
-				case BedShape.Circular:
-					// This could be much better if it checked the actual vertex data of the mesh against the cylinder
-					// first check if any of it is outside the bed rect
-					if (aabb.minXYZ.X < bed.BedCenter.X - bed.ViewerVolume.X / 2
-						|| aabb.maxXYZ.X > bed.BedCenter.X + bed.ViewerVolume.X / 2
-						|| aabb.minXYZ.Y < bed.BedCenter.Y - bed.ViewerVolume.Y / 2
-						|| aabb.maxXYZ.Y > bed.BedCenter.Y + bed.ViewerVolume.Y / 2)
-					{
-						// TODO: then check if all of it is outside the bed circle
-						return false;
-					}
-					break;
-			}
-
-			return true;
-		}
-
-		/// <summary>
-		/// Filters items from a given source returning only persistable items inside the Build Volume
-		/// </summary>
-		/// <param name="source">The source content to filter</param>
-		/// <param name="printer">The printer config to consider</param>
-		/// <returns></returns>
-		public static IEnumerable<IObject3D> PrintableItems(this PrinterConfig printer, IObject3D source)
-		{
-			return source.VisibleMeshes().Where(item => printer.InsideBuildVolume(item) && item.WorldPersistable());
-		}
 	}
 
 	public class MeshViewerWidget : GuiWidget
@@ -322,19 +260,16 @@ namespace MatterHackers.MeshVisualizer
 
 			gridColors = new GridColors()
 			{
-				Gray = theme.ResolveColor(theme.ActiveTabColor, theme.GetBorderColor((theme.IsDarkTheme ? 35 : 55))),
-				Red = theme.ResolveColor(theme.ActiveTabColor, new Color(Color.Red, (theme.IsDarkTheme ? 105 : 170))),
-				Green = theme.ResolveColor(theme.ActiveTabColor, new Color(Color.Green, (theme.IsDarkTheme ? 105 : 170))),
-				Blue = theme.ResolveColor(theme.ActiveTabColor, new Color(Color.Blue, 195))
+				Gray = theme.ResolveColor(theme.BackgroundColor, theme.GetBorderColor((theme.IsDarkTheme ? 35 : 55))),
+				Red = theme.ResolveColor(theme.BackgroundColor, new Color(Color.Red, (theme.IsDarkTheme ? 105 : 170))),
+				Green = theme.ResolveColor(theme.BackgroundColor, new Color(Color.Green, (theme.IsDarkTheme ? 105 : 170))),
+				Blue = theme.ResolveColor(theme.BackgroundColor, new Color(Color.Blue, 195))
 			};
 
 			gCodeMeshColor = new Color(theme.PrimaryAccentColor, 35);
 
-			scene.SelectionChanged += (sender, e) =>
-			{
-				Invalidate();
-				lastSelectionChangedMs = UiThread.CurrentTimerMs;
-			};
+			// Register listeners
+			scene.SelectionChanged += selection_Changed;
 
 			BuildVolumeColor = new ColorF(.2, .8, .3, .2).ToColor();
 
@@ -342,6 +277,7 @@ namespace MatterHackers.MeshVisualizer
 
 			if (ViewOnlyTexture == null)
 			{
+				// TODO: What is the ViewOnlyTexture???
 				UiThread.RunOnIdle(() =>
 				{
 					ViewOnlyTexture = new ImageBuffer(32, 32, 32);
@@ -388,6 +324,14 @@ namespace MatterHackers.MeshVisualizer
 			}
 
 			base.OnLoad(args);
+		}
+
+		public override void OnClosed(EventArgs e)
+		{
+			// Unregister listeners
+			scene.SelectionChanged -= selection_Changed;
+
+			base.OnClosed(e);
 		}
 
 		public override void FindNamedChildrenRecursive(string nameToSearchFor, List<WidgetAndPosition> foundChildren, RectangleDouble touchingBounds, SearchType seachType, bool allowInvalidItems = true)
@@ -567,11 +511,11 @@ namespace MatterHackers.MeshVisualizer
 					|| isDebugItem)
 				{
 					// Render as solid
-					GLHelper.Render(item.Mesh, 
-						drawColor, 
-						item.WorldMatrix(), 
-						sceneContext.ViewState.RenderType, 
-						item.WorldMatrix() * World.ModelviewMatrix, 
+					GLHelper.Render(item.Mesh,
+						drawColor,
+						item.WorldMatrix(),
+						sceneContext.ViewState.RenderType,
+						item.WorldMatrix() * World.ModelviewMatrix,
 						darkWireframe, () => Invalidate());
 				}
 				else if (drawColor != Color.Transparent)
@@ -854,7 +798,7 @@ namespace MatterHackers.MeshVisualizer
 				// only render if we are above the bed
 				if (sceneContext.RendererOptions.RenderBed)
 				{
-					var bedColor = theme.ResolveColor(Color.White, theme.ActiveTabColor.WithAlpha(111));
+					var bedColor = theme.ResolveColor(Color.White, theme.BackgroundColor.WithAlpha(111));
 
 
 					if (!lookingDownOnBed)
@@ -937,6 +881,12 @@ namespace MatterHackers.MeshVisualizer
 			{
 				interactionVolume.DrawGlContent(new DrawGlContentEventArgs(true, e));
 			}
+		}
+
+		void selection_Changed(object sender, EventArgs e)
+		{
+			Invalidate();
+			lastSelectionChangedMs = UiThread.CurrentTimerMs;
 		}
 
 		public enum ModelRenderStyle

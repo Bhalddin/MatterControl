@@ -228,13 +228,20 @@ namespace MatterHackers.MatterControl.CustomWidgets
 				{
 					OnBeforeSelect(null);
 
+					// if the current selection (before change) is !null than clear its background color
 					if (_selectedNode != null)
 					{
 						_selectedNode.HighlightRegion.BackgroundColor = Color.Transparent;
 					}
 
+					// change the selection
 					_selectedNode = value;
-					_selectedNode.HighlightRegion.BackgroundColor = theme.AccentMimimalOverlay;
+
+					if (_selectedNode != null)
+					{
+						_selectedNode.HighlightRegion.BackgroundColor = theme.AccentMimimalOverlay;
+					}
+
 					OnAfterSelect(null);
 				}
 			}

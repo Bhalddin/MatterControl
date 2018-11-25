@@ -36,38 +36,57 @@ using MatterHackers.MatterControl.CustomWidgets;
 using MatterHackers.MatterControl.Library.Widgets.HardwarePage;
 using MatterHackers.MatterControl.PartPreviewWindow;
 using MatterHackers.MatterControl.SlicerConfiguration;
+using MatterHackers.VectorMath;
 
 namespace MatterHackers.MatterControl.PrintLibrary
 {
-	public class HardwareTabPage : GuiWidget
+	public class HardwareTabPage : FlowLayoutWidget
 	{
 		private ThemeConfig theme;
-		private TreeView treeView;
 
 		public HardwareTabPage(ThemeConfig theme)
+			: base (FlowDirection.TopToBottom)
 		{
 			this.theme = theme;
 			this.Padding = 0;
-			this.AnchorAll();
+			this.HAnchor = HAnchor.Stretch;
+			this.VAnchor = VAnchor.Stretch;
 
-			var allControls = new FlowLayoutWidget(FlowDirection.TopToBottom);
+			var toolbar = new Toolbar(theme)
+			{
+				HAnchor = HAnchor.Stretch,
+				VAnchor = VAnchor.Fit,
+				Padding = theme.ToolbarPadding
+			};
+
+			theme.ApplyBottomBorder(toolbar);
+
+			toolbar.AddChild(new TextButton("Inventory".Localize(), theme)
+			{
+				Padding = new BorderDouble(6, 0),
+				MinimumSize = new Vector2(0, theme.ButtonHeight),
+				Selectable = false
+			});
+
+			this.AddChild(toolbar);
 
 			var horizontalSplitter = new Splitter()
 			{
 				SplitterDistance = UserSettings.Instance.LibraryViewWidth,
 				SplitterSize = theme.SplitterWidth,
-				SplitterBackground = theme.SplitterBackground
+				SplitterBackground = theme.SplitterBackground,
+				HAnchor = HAnchor.Stretch,
+				VAnchor = VAnchor.Stretch,
 			};
-			horizontalSplitter.AnchorAll();
 
 			horizontalSplitter.DistanceChanged += (s, e) =>
 			{
 				UserSettings.Instance.LibraryViewWidth = horizontalSplitter.SplitterDistance;
 			};
 
-			allControls.AddChild(horizontalSplitter);
+			this.AddChild(horizontalSplitter);
 
-			treeView = new InventoryTreeView(theme)
+			var treeView = new HardwareTreeView(theme)
 			{
 				HAnchor = HAnchor.Stretch,
 				VAnchor = VAnchor.Stretch,
@@ -85,15 +104,15 @@ namespace MatterHackers.MatterControl.PrintLibrary
 					if (treeView?.SelectedNode.Tag is PrinterInfo printerInfo)
 					{
 						if (ApplicationController.Instance.ActivePrinters.FirstOrDefault(p => p.Settings.ID == printerInfo.ID) is PrinterConfig printer
-							&& ApplicationController.Instance.AppView.TabControl.AllTabs.FirstOrDefault(t => t.TabContent is PrinterTabPage printerTabPage && printerTabPage.printer == printer) is ITab tab)
+							&& ApplicationController.Instance.MainView.TabControl.AllTabs.FirstOrDefault(t => t.TabContent is PrinterTabPage printerTabPage && printerTabPage.printer == printer) is ITab tab)
 						{
 							// Switch to existing printer tab
-							ApplicationController.Instance.AppView.TabControl.ActiveTab = tab;
+							ApplicationController.Instance.MainView.TabControl.ActiveTab = tab;
 						}
 						else
 						{
 							// Open new printer tab
-							PrinterDetails.SwitchPrinters(printerInfo.ID);
+							ApplicationController.Instance.OpenPrinter(printerInfo.ID).ConfigureAwait(false);
 						}
 					}
 				}
@@ -114,8 +133,8 @@ namespace MatterHackers.MatterControl.PrintLibrary
 						{
 							if (treeView?.SelectedNode.Tag is PrinterInfo printerInfo)
 							{
-									// Open printer
-									PrinterDetails.SwitchPrinters(printerInfo.ID);
+								// Open printer
+								ApplicationController.Instance.OpenPrinter(printerInfo.ID).ConfigureAwait(false);
 							}
 						};
 
@@ -132,7 +151,7 @@ namespace MatterHackers.MatterControl.PrintLibrary
 										{
 											if (treeView.SelectedNode.Tag is PrinterInfo printerInfo)
 											{
-												ProfileManager.Instance.DeletePrinter(printerInfo.ID, true);
+												ProfileManager.Instance.DeletePrinter(printerInfo.ID);
 											}
 										}
 									},
@@ -182,10 +201,6 @@ namespace MatterHackers.MatterControl.PrintLibrary
 				HAnchor =HAnchor.Stretch,
 				VAnchor = VAnchor.Stretch,
 			});
-
-			allControls.AnchorAll();
-
-			this.AddChild(allControls);
 		}
 	}
 }

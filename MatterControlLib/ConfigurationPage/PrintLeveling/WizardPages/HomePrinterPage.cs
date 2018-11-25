@@ -34,12 +34,11 @@ using MatterHackers.MatterControl.SlicerConfiguration;
 
 namespace MatterHackers.MatterControl.ConfigurationPage.PrintLeveling
 {
-	public class HomePrinterPage : LevelingWizardPage
+	public class HomePrinterPage : PrinterSetupWizardPage
 	{
-		private EventHandler unregisterEvents;
 		private bool autoAdvance;
 
-		public HomePrinterPage(LevelingWizard context, string headerText, string instructionsText, bool autoAdvance)
+		public HomePrinterPage(PrinterSetupWizard context, string headerText, string instructionsText, bool autoAdvance)
 			: base(context, headerText, instructionsText)
 		{
 			this.autoAdvance = autoAdvance;
@@ -47,16 +46,15 @@ namespace MatterHackers.MatterControl.ConfigurationPage.PrintLeveling
 
 		public override void OnClosed(EventArgs e)
 		{
-			unregisterEvents?.Invoke(this, null);
+			// Unregister listeners
+			printer.Connection.CommunicationStateChanged -= CheckHomeFinished;
+
 			base.OnClosed(e);
 		}
 
 		public override void PageIsBecomingActive()
 		{
-			// make sure we don't have anything left over
-			unregisterEvents?.Invoke(this, null);
-
-			printer.Connection.CommunicationStateChanged.RegisterEvent(CheckHomeFinished, ref unregisterEvents);
+			printer.Connection.CommunicationStateChanged += CheckHomeFinished;
 
 			printer.Connection.HomeAxis(PrinterConnection.Axis.XYZ);
 
@@ -68,7 +66,7 @@ namespace MatterHackers.MatterControl.ConfigurationPage.PrintLeveling
 
 			if (autoAdvance)
 			{
-				nextButton.Enabled = false;
+				NextButton.Enabled = false;
 			}
 
 			base.PageIsBecomingActive();
@@ -76,22 +74,20 @@ namespace MatterHackers.MatterControl.ConfigurationPage.PrintLeveling
 
 		private void CheckHomeFinished(object sender, EventArgs e)
 		{
-			if(printer.Connection.DetailedPrintingState != DetailedPrintingState.HomingAxis)
+			if (printer.Connection.DetailedPrintingState != DetailedPrintingState.HomingAxis)
 			{
-				unregisterEvents?.Invoke(this, null);
-				nextButton.Enabled = true;
+				NextButton.Enabled = true;
 
 				if (printer.Settings.Helpers.UseZProbe())
 				{
-					UiThread.RunOnIdle(() => nextButton.InvokeClick());
+					UiThread.RunOnIdle(() => NextButton.InvokeClick());
 				}
 			}
 		}
 
 		public override void PageIsBecomingInactive()
 		{
-			unregisterEvents?.Invoke(this, null);
-			nextButton.Enabled = true;
+			NextButton.Enabled = true;
 
 			base.PageIsBecomingInactive();
 		}

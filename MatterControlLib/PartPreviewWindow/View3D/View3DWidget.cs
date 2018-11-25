@@ -147,9 +147,6 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 
 			this.Scene.Invalidated += Scene_Invalidated;
 
-			// if the scene is invalidated invalidate the widget
-			Scene.Invalidated += (s, e) => Invalidate();
-
 			this.AnchorAll();
 
 			TrackballTumbleWidget.TransformState = TrackBallTransformType.Rotation;
@@ -178,39 +175,38 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 			{
 				Margin = new BorderDouble(left: theme.DefaultContainerPadding + 12),
 			};
-			treeView.AfterSelect += (s, e) =>
-			{
-				// Ignore AfterSelect events if they're being driven by a SelectionChanged event
-				if (!assigningTreeNode)
-				{
-					Scene.SelectedItem = (IObject3D)treeView.SelectedNode.Tag;
-				}
-				selectedObjectPanel.SetActiveItem((IObject3D)treeView.SelectedNode.Tag);
-			};
 			treeView.NodeMouseClick += (s, e) =>
 			{
 				if (e is MouseEventArgs sourceEvent
-					&& s is GuiWidget clickedWidget
-					&& sourceEvent.Button == MouseButtons.Right)
+					&& s is GuiWidget clickedWidget)
 				{
-					UiThread.RunOnIdle(() =>
+					// Ignore AfterSelect events if they're being driven by a SelectionChanged event
+					if (!assigningTreeNode)
 					{
-						var menu = ApplicationController.Instance.GetActionMenuForSceneItem((IObject3D)treeView.SelectedNode.Tag, Scene, true);
+						Scene.SelectedItem = (IObject3D)treeView.SelectedNode.Tag;
+					}
 
-						var systemWindow = this.Parents<SystemWindow>().FirstOrDefault();
-						systemWindow.ShowPopup(
-							new MatePoint(clickedWidget)
-							{
-								Mate = new MateOptions(MateEdge.Left, MateEdge.Top),
-								AltMate = new MateOptions(MateEdge.Left, MateEdge.Top)
-							},
-							new MatePoint(menu)
-							{
-								Mate = new MateOptions(MateEdge.Left, MateEdge.Top),
-								AltMate = new MateOptions(MateEdge.Right, MateEdge.Top)
-							},
-							altBounds: new RectangleDouble(sourceEvent.X + 1, sourceEvent.Y + 1, sourceEvent.X + 1, sourceEvent.Y + 1));
-					});
+					if (sourceEvent.Button == MouseButtons.Right)
+					{
+						UiThread.RunOnIdle(() =>
+						{
+							var menu = ApplicationController.Instance.GetActionMenuForSceneItem((IObject3D)treeView.SelectedNode.Tag, Scene, true);
+
+							var systemWindow = this.Parents<SystemWindow>().FirstOrDefault();
+							systemWindow.ShowPopup(
+								new MatePoint(clickedWidget)
+								{
+									Mate = new MateOptions(MateEdge.Left, MateEdge.Top),
+									AltMate = new MateOptions(MateEdge.Left, MateEdge.Top)
+								},
+								new MatePoint(menu)
+								{
+									Mate = new MateOptions(MateEdge.Left, MateEdge.Top),
+									AltMate = new MateOptions(MateEdge.Right, MateEdge.Top)
+								},
+								altBounds: new RectangleDouble(sourceEvent.X + 1, sourceEvent.Y + 1, sourceEvent.X + 1, sourceEvent.Y + 1));
+						});
+					}
 				}
 			};
 			treeView.ScrollArea.ChildAdded += (s, e) =>
@@ -250,7 +246,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 				VAnchor = VAnchor.Stretch
 			};
 
-			titleAndTreeView.AddChild(workspaceName = new InlineStringEdit(sceneContext.Scene.Name ?? "", theme, "WorkspaceName")
+			titleAndTreeView.AddChild(workspaceName = new InlineStringEdit(sceneContext.Scene.Name ?? "", theme, "WorkspaceName", editable: false)
 			{
 				Border = new BorderDouble(top: 1),
 				BorderColor = theme.SplitterBackground
@@ -393,14 +389,17 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 				var rootNode = Object3DTreeBuilder.BuildTree(child, keyValues, theme);
 				treeNodeContainer.AddChild(rootNode);
 				rootNode.TreeView = treeView;
-
-				if (this.Parent != null)
-				{
-					assigningTreeNode = true;
-					treeView.SelectedNode = rootNode;
-					assigningTreeNode = false;
-				}
 			}
+
+			// Ensure selectedItem is selected
+			var selectedItem = sceneContext.Scene.SelectedItem;
+			if (selectedItem != null
+				&& keyValues.TryGetValue(selectedItem, out TreeNode treeNode))
+			{
+				treeView.SelectedNode = treeNode;
+			}
+
+			Invalidate();
 		}
 
 		private Dictionary<string, NamedAction> InitWorkspaceActions()
@@ -494,7 +493,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 						Shortcut = "Ctrl+V",
 						Action = () =>
 						{
-							sceneContext.Scene.Paste();
+							sceneContext.Paste();
 						},
 						IsEnabled = () => Clipboard.Instance.ContainsImage || Clipboard.Instance.GetText() == "!--IObjectSelection--!"
 					}
@@ -519,14 +518,10 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 						Icon = AggContext.StaticData.LoadIcon("cube_export.png", 16, 16, invertIcons),
 						Action = () =>
 						{
-							UiThread.RunOnIdle(async () =>
-							{
-								DialogWindow.Show(
-									new ExportPrintItemPage(new[]
-									{
-										new InMemoryLibraryItem(sceneContext.Scene)
-									}, false));
-							});
+							ApplicationController.Instance.ExportLibraryItems(
+								new[] { new InMemoryLibraryItem(sceneContext.Scene)},
+								centerOnBed: false,
+								printer: printer);
 						},
 						IsEnabled = () => sceneContext.EditableScene
 							|| (sceneContext.EditContext.SourceItem is ILibraryAsset libraryAsset
@@ -631,6 +626,11 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 
 		private void SceneContext_SceneLoaded(object sender, EventArgs e)
 		{
+			if (AppContext.IsLoading)
+			{
+				return;
+			}
+
 			if (printerTabPage?.printerActionsBar?.sliceButton is GuiWidget sliceButton)
 			{
 				sliceButton.Enabled = sceneContext.EditableScene;
@@ -675,7 +675,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 					var window = DialogWindow.Show(new SetupStepMakeModelName());
 					window.Closed += (s2, e2) =>
 					{
-						if (ApplicationController.Instance.ActivePrinter is PrinterConfig printer
+						if (ApplicationController.Instance.ActivePrinters.FirstOrDefault() is PrinterConfig printer
 							&& printer.Settings.PrinterSelected)
 						{
 							CopyPlateToPrinter(sceneContext, printer);
@@ -683,25 +683,48 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 					};
 				});
 			}
-			else if (ApplicationController.Instance.ActivePrinter is PrinterConfig printer && printer.Settings.PrinterSelected)
+			else if (ApplicationController.Instance.ActivePrinters.Count() is int printerCount && printerCount > 0)
 			{
-				// If a printer exists, stash plate with undo operation, then load this scene onto the printer bed
-				CopyPlateToPrinter(sceneContext, printer);
+				if (printerCount == 1
+					&& ApplicationController.Instance.ActivePrinters.FirstOrDefault() is PrinterConfig firstPrinter)
+				{
+					// If one printer exists, stash plate with undo operation, then load this scene onto the printer bed
+					CopyPlateToPrinter(sceneContext, firstPrinter);
+				}
+				else
+				{
+					// If multiple active printers exist, show select printer dialog
+					UiThread.RunOnIdle(() =>
+					{
+						DialogWindow.Show(
+							new OpenPrinterPage(
+								"Next".Localize(),
+								(selectedPrinter) =>
+								{
+									if (selectedPrinter?.Settings.PrinterSelected == true)
+									{
+										CopyPlateToPrinter(sceneContext, selectedPrinter);
+									}
+								}));
+					});
+				}
 			}
 			else if (ProfileManager.Instance.ActiveProfiles.Any())
 			{
 				// If no active printer but profiles exist, show select printer
 				UiThread.RunOnIdle(() =>
 				{
-					var window = DialogWindow.Show(new SelectPrinterPage("Next".Localize()));
-					window.Closed += (s2, e2) =>
-					{
-						if (ApplicationController.Instance.ActivePrinter is PrinterConfig activePrinter
-							&& activePrinter.Settings.PrinterSelected)
-						{
-							CopyPlateToPrinter(sceneContext, activePrinter);
-						}
-					};
+					DialogWindow.Show(
+						new OpenPrinterPage(
+							"Next".Localize(),
+							(loadedPrinter) =>
+							{
+								if (loadedPrinter is PrinterConfig activePrinter
+									&& activePrinter.Settings.PrinterSelected)
+								{
+									CopyPlateToPrinter(sceneContext, activePrinter);
+								}
+							}));
 				});
 			}
 		}
@@ -715,7 +738,8 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 				// Clear bed to get new MCX on disk for this item
 				printer.Bed.ClearPlate();
 
-				await printer.Bed.LoadContent(sceneContext.EditContext);
+				// Load current scene into new printer scene
+				await printer.Bed.LoadIntoCurrent(sceneContext.EditContext);
 
 				bool allInBounds = true;
 				foreach (var item in printer.Bed.Scene.VisibleMeshes())
@@ -749,7 +773,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 				}
 
 				// Switch to printer
-				ApplicationController.Instance.AppView.TabControl.SelectedTabKey = printer.Settings.GetValue(SettingsKey.printer_name);
+				ApplicationController.Instance.MainView.TabControl.SelectedTabKey = printer.Settings.GetValue(SettingsKey.printer_name);
 
 				// Save any pending changes before starting print operation
 				await ApplicationController.Instance.Tasks.Execute("Saving Changes".Localize(), printer.Bed.SaveChanges);
@@ -1714,14 +1738,10 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 								Icon = AggContext.StaticData.LoadIcon("cube_export.png", 16, 16, AppContext.MenuTheme.InvertIcons),
 								Action = () =>
 								{
-									UiThread.RunOnIdle(async () =>
-									{
-										DialogWindow.Show(
-											new ExportPrintItemPage(new[]
-											{
-												new InMemoryLibraryItem(selectedItem)
-											}, false));
-									});
+									ApplicationController.Instance.ExportLibraryItems(
+										new[]{ new InMemoryLibraryItem(selectedItem)},
+										centerOnBed: false,
+										printer: printer);
 								}
 							},
 							new ActionSeparator(),
@@ -1757,7 +1777,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 						Title = "Paste".Localize(),
 						Action = () =>
 						{
-							Scene.Paste();
+							sceneContext.Paste();
 						},
 						IsEnabled = () => Clipboard.Instance.ContainsImage || Clipboard.Instance.GetText() == "!--IObjectSelection--!"
 					},
@@ -1798,38 +1818,36 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 		{
 			if (e.InvalidateType == InvalidateType.Content)
 			{
-				this.RebuildTree();
+				UiThread.RunOnIdle(this.RebuildTree);
 			}
+
+			// Invalidate widget on scene invalidate
+			this.Invalidate();
 		}
 
 		private void Scene_SelectionChanged(object sender, EventArgs e)
 		{
-			var selectedItem = Scene.SelectedItem;
-			foreach (var child in selectedObjectPanel.ContentPanel.Children)
+			if (deferEditorTillMouseUp)
 			{
-				child.Enabled = selectedItem != null;
-			}
-
-			if (selectedItem == null)
-			{
-				this.Scene.ClearSelection();
-
-				// Clear the TreeView and release node references when no item is selected
 				selectedObjectPanel.SetActiveItem(null);
-				return;
 			}
 			else
 			{
+				var selectedItem = Scene.SelectedItem;
+
 				// Change tree selection to current node
-				if (keyValues.TryGetValue(selectedItem, out TreeNode treeNode))
+				if (selectedItem != null
+					&& keyValues.TryGetValue(selectedItem, out TreeNode treeNode))
 				{
 					treeView.SelectedNode = treeNode;
 				}
-			}
+				else
+				{
+					// Clear the TreeView and release node references when no item is selected
+					treeView.SelectedNode = null;
+				}
 
-			if (deferEditorTillMouseUp)
-			{
-				return;
+				selectedObjectPanel.SetActiveItem(selectedItem);
 			}
 		}
 
@@ -1900,7 +1918,7 @@ namespace MatterHackers.MatterControl.PartPreviewWindow
 
 		public void Save()
 		{
-			ApplicationController.Instance.Tasks.Execute("Saving".Localize(), Printer.Bed.SaveChanges);
+			ApplicationController.Instance.Tasks.Execute("Saving".Localize(), sceneContext.SaveChanges);
 		}
 	}
 

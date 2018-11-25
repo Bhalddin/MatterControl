@@ -47,12 +47,11 @@ namespace MatterHackers.MatterControl
 		private CheckBox showInFolderAfterSave;
 
 		private Dictionary<RadioButton, IExportPlugin> exportPluginButtons;
-
 		private IEnumerable<ILibraryItem> libraryItems;
 
 		bool centerOnBed;
 
-		public ExportPrintItemPage(IEnumerable<ILibraryItem> libraryItems, bool centerOnBed)
+		public ExportPrintItemPage(IEnumerable<ILibraryItem> libraryItems, bool centerOnBed, PrinterConfig printer)
 		{
 			this.centerOnBed = centerOnBed;
 			this.WindowTitle = "Export File".Localize();
@@ -64,9 +63,6 @@ namespace MatterHackers.MatterControl
 			var commonMargin = new BorderDouble(4, 2);
 
 			bool isFirstItem = true;
-
-			// TODO: Someday export operations need to resolve printer context interactively
-			var printer = ApplicationController.Instance.ActivePrinter;
 
 			// GCode export
 			exportPluginButtons = new Dictionary<RadioButton, IExportPlugin>();
@@ -82,7 +78,7 @@ namespace MatterHackers.MatterControl
 				}
 
 				// Create export button for each plugin
-				var pluginButton = new RadioButton(new RadioImageWidget(plugin.ButtonText, theme.Colors.PrimaryTextColor, plugin.Icon))
+				var pluginButton = new RadioButton(new RadioImageWidget(plugin.ButtonText, theme.TextColor, plugin.Icon))
 				{
 					HAnchor = HAnchor.Left,
 					Margin = commonMargin,
@@ -117,7 +113,7 @@ namespace MatterHackers.MatterControl
 			if (AggContext.OperatingSystem == OSType.Windows
 				|| AggContext.OperatingSystem == OSType.X11)
 			{
-				showInFolderAfterSave = new CheckBox("Show file in folder after save".Localize(), ActiveTheme.Instance.PrimaryTextColor, 10)
+				showInFolderAfterSave = new CheckBox("Show file in folder after save".Localize(), theme.TextColor, 10)
 				{
 					HAnchor = HAnchor.Left,
 					Cursor = Cursors.Hand

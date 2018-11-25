@@ -84,7 +84,9 @@ namespace MatterHackers.MatterControl.Library.Export
 				Margin = new BorderDouble(left: 40, bottom: 10),
 			};
 
-			var spiralVaseCheckbox = new CheckBox("Spiral Vase".Localize(), ActiveTheme.Instance.PrimaryTextColor, 10)
+			var theme = AppContext.Theme;
+
+			var spiralVaseCheckbox = new CheckBox("Spiral Vase".Localize(), theme.TextColor, 10)
 			{
 				Checked = false,
 				Cursor = Cursors.Hand,
@@ -98,7 +100,7 @@ namespace MatterHackers.MatterControl.Library.Export
 			// If print leveling is enabled then add in a check box 'Apply Leveling During Export' and default checked.
 			if (printer.Settings.GetValue<bool>(SettingsKey.print_leveling_enabled))
 			{
-				var levelingCheckbox = new CheckBox("Apply leveling to G-Code during export".Localize(), ActiveTheme.Instance.PrimaryTextColor, 10)
+				var levelingCheckbox = new CheckBox("Apply leveling to G-Code during export".Localize(), theme.TextColor, 10)
 				{
 					Checked = true,
 					Cursor = Cursors.Hand,
@@ -127,7 +129,7 @@ namespace MatterHackers.MatterControl.Library.Export
 					using (var gcodeStream = await assetStream.GetStream(progress: null))
 					{
 						this.ApplyStreamPipelineAndExport(
-							new GCodeFileStream(new GCodeFileStreamed(gcodeStream.Stream)),
+							new GCodeFileStream(new GCodeFileStreamed(gcodeStream.Stream), printer),
 							outputPath);
 
 						return true;
@@ -161,17 +163,15 @@ namespace MatterHackers.MatterControl.Library.Export
 
 				if (loadedItem != null)
 				{
-					// Necessary to ensure scene or non-persisted ILibraryObject3D content is on disk before slicing
-					loadedItem.PersistAssets(null);
+					// Ensure content is on disk before slicing
+					await loadedItem.PersistAssets(null);
 
 					try
 					{
 						string sourceExtension = $".{firstItem.ContentType}";
 						string assetPath = await AssetObject3D.AssetManager.StoreMcx(loadedItem, false);
 
-						string fileHashCode = Path.GetFileNameWithoutExtension(assetPath);
-
-						string gcodePath = PrintItemWrapper.GCodePath(fileHashCode);
+						string gcodePath = printer.GCodePath(HashGenerator.ComputeFileSHA1(assetPath));
 
 						if (ApplicationSettings.ValidFileExtensions.IndexOf(sourceExtension, StringComparison.OrdinalIgnoreCase) >= 0
 							|| string.Equals(sourceExtension, ".mcx", StringComparison.OrdinalIgnoreCase))
@@ -234,20 +234,21 @@ namespace MatterHackers.MatterControl.Library.Export
 		{
 			try
 			{
-				var queueStream = new QueuedCommandsStream(gCodeFileStream);
-
-				// this is added to ensure we are rewriting the G0 G1 commands as needed
-				GCodeStream finalStream = new ProcessWriteRegexStream(printer, queueStream, queueStream);
+				var queueStream = new QueuedCommandsStream(printer, gCodeFileStream);
+				GCodeStream accumulatedStream = queueStream;
 
 				if(printer.Settings.GetValue<bool>(SettingsKey.print_leveling_enabled) && this.ApplyLeveling)
 				{
-					if (printer.Settings.GetValue<bool>(SettingsKey.enable_line_spliting))
+					if (printer.Settings.GetValue<bool>(SettingsKey.enable_line_splitting))
 					{
-						finalStream = new BabyStepsStream(printer, finalStream, 1);
+						accumulatedStream = new BabyStepsStream(printer, accumulatedStream, 1);
 					}
 
-					finalStream = new PrintLevelingStream(printer, finalStream, false);
+					accumulatedStream = new PrintLevelingStream(printer, accumulatedStream, false);
 				}
+
+				// this is added to ensure we are rewriting the G0 G1 commands as needed
+				GCodeStream finalStream = new ProcessWriteRegexStream(printer, accumulatedStream, queueStream);
 
 				// Run each line from the source gcode through the loaded pipeline and dump to the output location
 				using (var file = new StreamWriter(outputPath))
@@ -285,7 +286,8 @@ namespace MatterHackers.MatterControl.Library.Export
 							new Vector4(),
 							new Vector4(),
 							Vector4.One,
-							CancellationToken.None)),
+							CancellationToken.None)
+							, printer),
 					outputPath);
 			}
 			catch (Exception e)
